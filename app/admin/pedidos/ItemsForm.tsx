@@ -31,7 +31,7 @@ export default function ItemsForm() {
               className="flex-[2]"
             />
             <input
-              type="number" placeholder="Cant." name="cantidad" min={0}
+              type="number" placeholder="Cant." name="cantidad" min={0} step="0.01"
               value={it.cantidad} onChange={(e) => update(idx, 'cantidad', e.target.value)}
               className="flex-1"
             />
