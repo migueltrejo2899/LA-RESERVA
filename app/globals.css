@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== LA RESERVA — identidad de marca ===== */
+/* Gris #2C2D31 · Verde #676F36 · Naranja #C2492A · Azul #626F77 · Lila #A57F9B · Kraft #DDCBB3 */
+
+body {
+  background-color: #EFE6D6;
+  color: #2C2D31;
+  background-image:
+    linear-gradient(#EFE6D6 0%, #EFE6D6 100%),
+    repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(44,45,49,0.035) 39px, rgba(44,45,49,0.035) 40px);
+}
+
+.card {
+  background: #FBF9F3;
+  border: 1px solid #CBBFA4;
+  border-radius: 3px;
+  padding: 24px;
+}
+
+/* Sello de estatus — elemento distintivo de la marca */
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+  transform: rotate(-3deg);
+  position: relative;
+}
+.stamp::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  opacity: .5;
+}
+.stamp.recibido { color: #626F77; }
+.stamp.preparacion { color: #C2492A; }
+.stamp.camino { color: #A57F9B; }
+.stamp.entregado { color: #676F36; }
+.stamp.cancelado { color: #2C2D31; }
+.stamp.pendiente { color: #C2492A; }
+.stamp.parcial { color: #A57F9B; }
+.stamp.pagado { color: #676F36; }
+
+.field label {
+  display: block;
+  font-family: var(--font-subtitle);
+  font-size: 12px;
+  font-weight: 500;
+  color: #5B5C60;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.field input, .field select, .field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #CBBFA4;
+  border-radius: 2px;
+  background: #EFE6D6;
+  font-size: 14px;
+  color: #2C2D31;
+}
+
+.btn {
+  font-family: var(--font-subtitle);
+  font-weight: 500;
+  letter-spacing: .02em;
+  font-size: 14px;
+  padding: 12px 22px;
+  border-radius: 2px;
+  border: 2px solid #676F36;
+  background: #676F36;
+  color: #FBF9F3;
+  cursor: pointer;
+  display: inline-block;
+}
+.btn.ghost { background: transparent; color: #676F36; }
+.btn.danger { background: #C2492A; border-color: #C2492A; }
+.btn.small { padding: 7px 14px; font-size: 12px; }
+
+/* Marca: monograma "R" — variante de ícono aprobada en el manual de identidad */
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #C2492A;
+  color: #FBF9F3;
+  font-family: var(--font-display);
+  border: 2px solid #2C2D31;
+}
