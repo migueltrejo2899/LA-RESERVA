@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { updateStatus, addPayment, uploadInvoice, updateInvoice, deleteInvoice } from './actions'
+import { updateStatus, addPayment, uploadInvoice, updateInvoice, deleteInvoice, updateOrderItem, deleteOrderItem, addOrderItem, updatePayment, deletePayment } from './actions'
 import { fmtDate, fmtMoney, statusClass } from '@/lib/utils'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
@@ -36,16 +36,53 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
         <div className="text-sm text-inksoft mb-4">Creado {fmtDate(order.created_at)}</div>
         <table className="w-full text-sm">
           <thead><tr className="text-xs font-mono uppercase text-inksoft border-b border-line">
-            <th className="text-left py-2">Producto</th><th className="text-left">Cant.</th><th className="text-left">Precio</th><th className="text-left">Subtotal</th>
+            <th className="text-left py-2">Producto</th><th className="text-left">Cant.</th><th className="text-left">Precio</th><th className="text-left">Subtotal</th><th></th>
           </tr></thead>
           <tbody>
             {items?.map((it) => (
-              <tr key={it.id} className="border-b border-line">
-                <td className="py-2">{it.producto}</td><td>{it.cantidad}</td><td>{fmtMoney(it.precio)}</td><td>{fmtMoney(it.cantidad * it.precio)}</td>
+              <tr key={it.id} className="border-b border-line align-top">
+                <td colSpan={5} className="py-2">
+                  <details>
+                    <summary className="cursor-pointer list-none grid grid-cols-4 gap-2 items-center">
+                      <span>{it.producto}</span>
+                      <span>{it.cantidad}</span>
+                      <span>{fmtMoney(it.precio)}</span>
+                      <span className="flex justify-between items-center">
+                        {fmtMoney(it.cantidad * it.precio)}
+                        <span className="text-xs font-mono text-crate underline">editar</span>
+                      </span>
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <form action={updateOrderItem} className="field grid grid-cols-4 gap-2 items-end">
+                        <input type="hidden" name="orderId" value={order.id} />
+                        <input type="hidden" name="itemId" value={it.id} />
+                        <input type="text" name="producto" defaultValue={it.producto} />
+                        <input type="number" step="0.01" name="cantidad" defaultValue={it.cantidad} />
+                        <input type="number" step="0.01" name="precio" defaultValue={it.precio} />
+                        <button className="btn small w-fit">Guardar</button>
+                      </form>
+                      <form action={deleteOrderItem}>
+                        <input type="hidden" name="orderId" value={order.id} />
+                        <input type="hidden" name="itemId" value={it.id} />
+                        <button className="btn danger small">Eliminar artículo</button>
+                      </form>
+                    </div>
+                  </details>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm text-crate underline">+ agregar artículo a este pedido</summary>
+          <form action={addOrderItem} className="field grid grid-cols-4 gap-2 items-end mt-2">
+            <input type="hidden" name="orderId" value={order.id} />
+            <input type="text" name="producto" placeholder="Producto" />
+            <input type="number" step="0.01" name="cantidad" placeholder="Cantidad" />
+            <input type="number" step="0.01" name="precio" placeholder="Precio unit." />
+            <button className="btn small w-fit">Agregar</button>
+          </form>
+        </details>
         <div className="flex justify-between font-mono font-bold text-base border-t-2 border-ink pt-3 mt-3">
           <span>Total pedido</span><span>{fmtMoney(order.total)}</span>
         </div>
@@ -79,15 +116,45 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
         <h3 className="font-display text-lg mb-3">Pagos</h3>
         <table className="w-full text-sm mb-3">
           <thead><tr className="text-xs font-mono uppercase text-inksoft border-b border-line">
-            <th className="text-left py-2">Fecha</th><th className="text-left">Monto</th><th className="text-left">Método</th><th className="text-left">Nota</th>
+            <th className="text-left py-2">Fecha</th><th className="text-left">Monto</th><th className="text-left">Método</th><th className="text-left">Nota</th><th></th>
           </tr></thead>
           <tbody>
             {payments?.map((p) => (
-              <tr key={p.id} className="border-b border-line">
-                <td className="py-2">{fmtDate(p.fecha)}</td><td>{fmtMoney(p.monto)}</td><td>{p.metodo}</td><td>{p.nota}</td>
+              <tr key={p.id} className="border-b border-line align-top">
+                <td colSpan={5} className="py-2">
+                  <details>
+                    <summary className="cursor-pointer list-none grid grid-cols-4 gap-2 items-center">
+                      <span>{fmtDate(p.fecha)}</span>
+                      <span>{fmtMoney(p.monto)}</span>
+                      <span>{p.metodo}</span>
+                      <span className="flex justify-between items-center">
+                        {p.nota}
+                        <span className="text-xs font-mono text-crate underline">editar</span>
+                      </span>
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <form action={updatePayment} className="field grid grid-cols-4 gap-2 items-end">
+                        <input type="hidden" name="orderId" value={order.id} />
+                        <input type="hidden" name="paymentId" value={p.id} />
+                        <input type="number" step="0.01" name="monto" defaultValue={p.monto} />
+                        <input type="date" name="fecha" defaultValue={p.fecha} />
+                        <select name="metodo" defaultValue={p.metodo}>
+                          <option>Transferencia</option><option>Efectivo</option><option>Cheque</option><option>Tarjeta</option>
+                        </select>
+                        <input type="text" name="nota" defaultValue={p.nota || ''} placeholder="Nota" />
+                        <button className="btn small w-fit col-span-4">Guardar</button>
+                      </form>
+                      <form action={deletePayment}>
+                        <input type="hidden" name="orderId" value={order.id} />
+                        <input type="hidden" name="paymentId" value={p.id} />
+                        <button className="btn danger small">Eliminar pago</button>
+                      </form>
+                    </div>
+                  </details>
+                </td>
               </tr>
             ))}
-            {(!payments || payments.length === 0) && <tr><td colSpan={4} className="text-inksoft py-2">Sin pagos registrados</td></tr>}
+            {(!payments || payments.length === 0) && <tr><td colSpan={5} className="text-inksoft py-2">Sin pagos registrados</td></tr>}
           </tbody>
         </table>
         <div className="flex justify-between font-mono text-sm"><span>Pagado</span><span>{fmtMoney(paid)}</span></div>
