@@ -52,19 +52,4 @@ export async function uploadInvoice(formData: FormData) {
   const { error: uploadError } = await supabase.storage.from('facturas').upload(path, file)
 
   if (uploadError) {
-    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent(uploadError.message)}`)
-  }
-
-  await supabase.from('invoices').insert({
-    client_id: clientId,
-    order_id: orderId,
-    tipo,
-    fecha,
-    monto,
-    file_path: path,
-    file_name: file.name,
-  })
-
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
+    redirect(
