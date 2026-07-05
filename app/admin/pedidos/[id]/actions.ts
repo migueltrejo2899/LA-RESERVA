@@ -30,11 +30,6 @@ export async function addPayment(formData: FormData) {
   }
 
   await supabase.from('payments').insert({ order_id: orderId, monto, fecha, metodo, nota })
-
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
-
 export async function uploadInvoice(formData: FormData) {
   const supabase = createClient()
   const orderId = String(formData.get('orderId') || '')
@@ -52,4 +47,51 @@ export async function uploadInvoice(formData: FormData) {
   const { error: uploadError } = await supabase.storage.from('facturas').upload(path, file)
 
   if (uploadError) {
-    redirect(
+    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent(uploadError.message)}`)
+  }
+
+  await supabase.from('invoices').insert({
+    client_id: clientId,
+    order_id: orderId,
+    tipo,
+    fecha,
+    monto,
+    file_path: path,
+    file_name: file.name,
+  })
+
+  revalidatePath(`/admin/pedidos/${orderId}`)
+  redirect(`/admin/pedidos/${orderId}`)
+}
+
+export async function updateInvoice(formData: FormData) {
+  const supabase = createClient()
+  const orderId = String(formData.get('orderId') || '')
+  const invoiceId = String(formData.get('invoiceId') || '')
+  const tipo = String(formData.get('tipo') || 'factura')
+  const fecha = String(formData.get('fecha') || '')
+  const monto = formData.get('monto') ? Number(formData.get('monto')) : null
+
+  await supabase.from('invoices').update({ tipo, fecha, monto }).eq('id', invoiceId)
+
+  revalidatePath(`/admin/pedidos/${orderId}`)
+  redirect(`/admin/pedidos/${orderId}`)
+}
+
+export async function deleteInvoice(formData: FormData) {
+  const supabase = createClient()
+  const orderId = String(formData.get('orderId') || '')
+  const invoiceId = String(formData.get('invoiceId') || '')
+  const filePath = String(formData.get('filePath') || '')
+
+  if (filePath) {
+    await supabase.storage.from('facturas').remove([filePath])
+  }
+  await supabase.from('invoices').delete().eq('id', invoiceId)
+
+  revalidatePath(`/admin/pedidos/${orderId}`)
+  redirect(`/admin/pedidos/${orderId}`)
+}
+  revalidatePath(`/admin/pedidos/${orderId}`)
+  redirect(`/admin/pedidos/${orderId}`)
+}
