@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { updateStatus, addPayment, uploadInvoice } from './actions'
+import { updateStatus, addPayment, uploadInvoice, updateInvoice, deleteInvoice } from './actions'
 import { fmtDate, fmtMoney, statusClass } from '@/lib/utils'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
@@ -111,12 +111,36 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
         <h3 className="font-display text-lg mb-3">Facturas y complementos de pago</h3>
         <div className="divide-y divide-line mb-4">
           {invoices?.map((inv) => (
-            <div key={inv.id} className="flex justify-between items-center py-3">
-              <div>
-                <span className={`stamp ${inv.tipo === 'factura' ? 'entregado' : 'preparacion'}`}>{inv.tipo === 'factura' ? 'Factura' : 'Complemento de pago'}</span>
-                <div className="text-sm mt-1">{inv.file_name} · {fmtDate(inv.fecha)} {inv.monto ? `· ${fmtMoney(inv.monto)}` : ''}</div>
+            <details key={inv.id} className="py-3">
+              <summary className="cursor-pointer flex justify-between items-center list-none">
+                <div>
+                  <span className={`stamp ${inv.tipo === 'factura' ? 'entregado' : 'preparacion'}`}>{inv.tipo === 'factura' ? 'Factura' : 'Complemento de pago'}</span>
+                  <div className="text-sm mt-1">{inv.file_name} · {fmtDate(inv.fecha)} {inv.monto ? `· ${fmtMoney(inv.monto)}` : ''}</div>
+                </div>
+                <span className="text-xs font-mono text-crate underline">editar / eliminar</span>
+              </summary>
+              <div className="mt-3 pl-1 space-y-3">
+                <form action={updateInvoice} className="field grid grid-cols-3 gap-3 items-end">
+                  <input type="hidden" name="orderId" value={order.id} />
+                  <input type="hidden" name="invoiceId" value={inv.id} />
+                  <div><label>Tipo</label>
+                    <select name="tipo" defaultValue={inv.tipo}>
+                      <option value="factura">Factura</option>
+                      <option value="complemento_pago">Complemento de pago</option>
+                    </select>
+                  </div>
+                  <div><label>Fecha</label><input type="date" name="fecha" defaultValue={inv.fecha} /></div>
+                  <div><label>Monto</label><input type="number" step="0.01" name="monto" defaultValue={inv.monto ?? ''} /></div>
+                  <button className="btn small col-span-3 w-fit">Guardar corrección</button>
+                </form>
+                <form action={deleteInvoice}>
+                  <input type="hidden" name="orderId" value={order.id} />
+                  <input type="hidden" name="invoiceId" value={inv.id} />
+                  <input type="hidden" name="filePath" value={inv.file_path} />
+                  <button className="btn danger small">Eliminar este archivo</button>
+                </form>
               </div>
-            </div>
+            </details>
           ))}
           {(!invoices || invoices.length === 0) && <p className="text-inksoft text-sm py-2">Sin archivos anexados a este pedido.</p>}
         </div>
