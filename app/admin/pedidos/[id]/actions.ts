@@ -30,6 +30,11 @@ export async function addPayment(formData: FormData) {
   }
 
   await supabase.from('payments').insert({ order_id: orderId, monto, fecha, metodo, nota })
+
+  revalidatePath(`/admin/pedidos/${orderId}`)
+  redirect(`/admin/pedidos/${orderId}`)
+}
+
 export async function uploadInvoice(formData: FormData) {
   const supabase = createClient()
   const orderId = String(formData.get('orderId') || '')
@@ -89,9 +94,6 @@ export async function deleteInvoice(formData: FormData) {
   }
   await supabase.from('invoices').delete().eq('id', invoiceId)
 
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
   revalidatePath(`/admin/pedidos/${orderId}`)
   redirect(`/admin/pedidos/${orderId}`)
 }
