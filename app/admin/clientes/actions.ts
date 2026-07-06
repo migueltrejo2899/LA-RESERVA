@@ -6,12 +6,17 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 export async function createClientUser(formData: FormData) {
-  const username = String(formData.get('username') || '').trim().toLowerCase()
+  const usernameRaw = String(formData.get('username') || '').trim()
+  const username = usernameRaw
+    .toLowerCase()
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-9._-]/g, '')
   const password = String(formData.get('password') || '')
   const name = String(formData.get('name') || '').trim()
   const contact = String(formData.get('contact') || '').trim()
+  const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
 
-  if (!username || !password || !name) {
+  if (!usernameRaw || !username || !password || !name) {
     redirect('/admin/clientes?error=' + encodeURIComponent('Usuario, contraseña y nombre son obligatorios.'))
   }
   if (password.length < 6) {
@@ -36,6 +41,7 @@ export async function createClientUser(formData: FormData) {
     username,
     name,
     contact,
+    rfc: rfc || null,
   })
 
   if (profileError) {
@@ -58,6 +64,21 @@ export async function updateClientPassword(formData: FormData) {
 
   const admin = createAdminClient()
   const { error } = await admin.auth.admin.updateUserById(clientId, { password: newPassword })
+  if (error) {
+    redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
+  }
+  revalidatePath('/admin/clientes')
+  redirect('/admin/clientes')
+}
+
+export async function updateClientInfo(formData: FormData) {
+  const clientId = String(formData.get('clientId') || '')
+  const name = String(formData.get('name') || '').trim()
+  const contact = String(formData.get('contact') || '').trim()
+  const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('profiles').update({ name, contact, rfc: rfc || null }).eq('id', clientId)
   if (error) {
     redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
   }
