@@ -19,11 +19,16 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
 
   const { data: invoices } = await query
 
-  // generar URLs firmadas (válidas 1 hora) para cada archivo
+  // generar URLs firmadas (válidas 1 hora) para cada archivo (PDF y XML si existe)
   const withUrls = await Promise.all(
     (invoices || []).map(async (inv) => {
       const { data: signed } = await supabase.storage.from('facturas').createSignedUrl(inv.file_path, 3600)
-      return { ...inv, url: signed?.signedUrl }
+      let xmlUrl: string | undefined
+      if (inv.xml_path) {
+        const { data: signedXml } = await supabase.storage.from('facturas').createSignedUrl(inv.xml_path, 3600)
+        xmlUrl = signedXml?.signedUrl
+      }
+      return { ...inv, url: signed?.signedUrl, xmlUrl }
     })
   )
 
@@ -39,28 +44,3 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
         <div>
           <label>Filtrar por día</label>
           <input type="date" name="dia" defaultValue={searchParams.dia} />
-        </div>
-        <button className="btn small">Filtrar</button>
-        <a href="/portal/facturas" className="text-sm font-mono text-crate underline mb-1">limpiar</a>
-      </form>
-
-      {withUrls.length === 0 && <p className="text-inksoft text-sm">No hay archivos para el filtro seleccionado.</p>}
-
-      <div className="divide-y divide-line">
-        {withUrls.map((inv) => (
-          <div key={inv.id} className="flex justify-between items-center py-3 flex-wrap gap-2">
-            <div>
-              <span className={`stamp ${inv.tipo === 'factura' ? 'entregado' : 'preparacion'}`}>
-                {inv.tipo === 'factura' ? 'Factura' : 'Complemento de pago'}
-              </span>
-              <div className="text-sm mt-1">{inv.file_name} · {fmtDate(inv.fecha)}{inv.monto ? ` · ${fmtMoney(inv.monto)}` : ''}</div>
-            </div>
-            {inv.url && (
-              <a href={inv.url} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
