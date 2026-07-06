@@ -19,6 +19,7 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
 
   const { data: invoices } = await query
 
+  // generar URLs firmadas (validas 1 hora) para cada archivo (PDF y XML si existe)
   const withUrls = await Promise.all(
     (invoices || []).map(async (inv) => {
       const { data: signed } = await supabase.storage.from('facturas').createSignedUrl(inv.file_path, 3600)
@@ -41,7 +42,7 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
           <input type="month" name="mes" defaultValue={searchParams.mes} />
         </div>
         <div>
-          <label>Filtrar por día</label>
+          <label>Filtrar por dia</label>
           <input type="date" name="dia" defaultValue={searchParams.dia} />
         </div>
         <button className="btn small">Filtrar</button>
@@ -57,7 +58,7 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
               <span className={`stamp ${inv.tipo === 'factura' ? 'entregado' : 'preparacion'}`}>
                 {inv.tipo === 'factura' ? 'Factura' : 'Complemento de pago'}
               </span>
-              <div className="text-sm mt-1">{inv.file_name} · {fmtDate(inv.fecha)}{inv.monto ? ` · ${fmtMoney(inv.monto)}` : ''}</div>
+              <div className="text-sm mt-1">{inv.file_name} - {fmtDate(inv.fecha)}{inv.monto ? ` - ${fmtMoney(inv.monto)}` : ''}</div>
             </div>
             <div className="flex gap-2">
               {inv.url && (
