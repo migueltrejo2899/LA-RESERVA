@@ -19,7 +19,6 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
 
   const { data: invoices } = await query
 
-  // generar URLs firmadas (validas 1 hora) para cada archivo (PDF y XML si existe)
   const withUrls = await Promise.all(
     (invoices || []).map(async (inv) => {
       const { data: signed } = await supabase.storage.from('facturas').createSignedUrl(inv.file_path, 3600)
