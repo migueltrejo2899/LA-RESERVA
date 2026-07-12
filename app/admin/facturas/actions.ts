@@ -138,3 +138,20 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
   revalidatePath('/admin/facturas')
   return results
 }
+
+export async function deleteInvoice(formData: FormData) {
+  const supabase = createClient()
+  const invoiceId = String(formData.get('invoiceId'))
+  const filePath = String(formData.get('filePath'))
+  const xmlPath = formData.get('xmlPath') ? String(formData.get('xmlPath')) : null
+
+  // Borrar archivos del storage
+  const pathsToDelete = [filePath]
+  if (xmlPath && xmlPath !== filePath) pathsToDelete.push(xmlPath)
+  await supabase.storage.from('facturas').remove(pathsToDelete)
+
+  // Borrar registro de la base de datos
+  await supabase.from('invoices').delete().eq('id', invoiceId)
+
+  revalidatePath('/admin/facturas')
+}
