@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { updateStatus, addPayment, uploadInvoice, updateInvoice, deleteInvoice, updateOrderItem, deleteOrderItem, addOrderItem, updatePayment, deletePayment } from './actions'
+import { updateOrder, deleteOrder, updateOrderDate, updateStatus, addPayment, uploadInvoice, updateInvoice, deleteInvoice, updateOrderItem, deleteOrderItem, addOrderItem, updatePayment, deletePayment } from './actions'
 import { fmtDate, fmtMoney, statusClass } from '@/lib/utils'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
@@ -18,6 +18,7 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
 
   if (!order) notFound()
 
+  const { data: clients } = await supabase.from('profiles').select('id, name, username').eq('role', 'client').order('name')
   const { data: items } = await supabase.from('order_items').select('*').eq('order_id', orderId)
   const { data: history } = await supabase.from('order_status_history').select('*').eq('order_id', orderId).order('created_at', { ascending: false })
   const { data: payments } = await supabase.from('payments').select('*').eq('order_id', orderId).order('fecha', { ascending: false })
@@ -30,12 +31,66 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
 
   return (
     <div className="space-y-5">
-      <Link href="/admin/pedidos" className="text-crate underline text-sm font-mono">← Volver a pedidos</Link>
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <Link href="/admin/pedidos" className="text-crate underline text-sm font-mono">← Volver a pedidos</Link>
+        <form action={deleteOrder}>
+          <input type="hidden" name="orderId" value={order.id} />
+          <details className="inline-block">
+            <summary className="cursor-pointer text-xs font-mono text-stamp underline list-none">eliminar pedido</summary>
+            <div className="mt-2 p-3 border border-line rounded-sm bg-offwhite">
+              <p className="text-xs text-inksoft mb-2">
+                Esto borra el pedido, sus artículos, pagos e historial. Las facturas y complementos ya
+                subidos NO se borran, solo se desligan de este pedido.
+              </p>
+              <button className="btn danger small">Sí, eliminar este pedido</button>
+            </div>
+          </details>
+        </form>
+      </div>
 
       <div className="card">
-        <div className="text-xs font-mono uppercase tracking-widest text-inksoft">{order.folio}</div>
-        <h2 className="font-display text-2xl mt-1">{order.profiles?.name}</h2>
-        <div className="text-sm text-inksoft mb-4">Creado {fmtDate(order.created_at)}</div>
+        <div className="flex justify-between items-start flex-wrap gap-3">
+          <div>
+            <div className="text-xs font-mono uppercase tracking-widest text-inksoft">{order.folio}</div>
+            <h2 className="font-display text-2xl mt-1">{order.profiles?.name}</h2>
+            <div className="text-sm text-inksoft mb-2">Creado {fmtDate(order.created_at)}</div>
+          </div>
+        </div>
+
+        <details className="mb-2">
+          <summary className="cursor-pointer text-xs font-mono text-crate underline">editar cliente / folio</summary>
+          <form action={updateOrder} className="field grid grid-cols-2 gap-3 items-end mt-2">
+            <input type="hidden" name="orderId" value={order.id} />
+            <div>
+              <label>Cliente</label>
+              <select name="clientId" defaultValue={order.client_id}>
+                {clients?.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.username})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>Folio</label>
+              <input type="text" name="folio" defaultValue={order.folio} />
+            </div>
+            <button className="btn small w-fit col-span-2">Guardar cambios</button>
+          </form>
+        </details>
+
+        <details className="mb-4">
+          <summary className="cursor-pointer text-xs font-mono text-crate underline">editar fecha de creación</summary>
+          <form action={updateOrderDate} className="field flex gap-3 items-end mt-2">
+            <input type="hidden" name="orderId" value={order.id} />
+            <div>
+              <label>Nueva fecha</label>
+              <input type="date" name="fecha" defaultValue={new Date(order.created_at).toISOString().slice(0, 10)} />
+            </div>
+            <button className="btn small w-fit">Guardar fecha</button>
+          </form>
+        </details>
+
+        {searchParams.error && <div className="text-stamp text-sm font-mono mb-4">{searchParams.error}</div>}
+
         <table className="w-full text-sm">
           <thead><tr className="text-xs font-mono uppercase text-inksoft border-b border-line">
             <th className="text-left py-2">Producto</th><th className="text-left">Cant.</th><th className="text-left">Precio</th><th className="text-left">Subtotal</th><th></th>
@@ -171,7 +226,6 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
             <select name="metodo"><option>Transferencia</option><option>Efectivo</option><option>Cheque</option><option>Tarjeta</option></select>
           </div>
           <div><label>Nota (opcional)</label><input type="text" name="nota" /></div>
-          {searchParams.error && <div className="text-stamp text-sm font-mono col-span-2">{searchParams.error}</div>}
           <button className="btn small col-span-2 w-fit">Agregar pago</button>
         </form>
       </div>
