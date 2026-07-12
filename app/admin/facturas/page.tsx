@@ -264,7 +264,7 @@ export default async function FacturasAdminPage({
                     <td style={{ padding: '10px 8px' }}>
                       <div style={{ display: 'flex', gap: 8 }}>
                         {inv.pdfUrl && (
-                          
+                          <a
                             href={inv.pdfUrl}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -279,7 +279,7 @@ export default async function FacturasAdminPage({
                           </a>
                         )}
                         {inv.xmlUrl && (
-                          
+                          <a
                             href={inv.xmlUrl}
                             target="_blank"
                             rel="noopener noreferrer"
