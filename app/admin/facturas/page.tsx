@@ -2,11 +2,12 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtDate, fmtMoney } from '@/lib/utils'
 import UploadForm from './UploadForm'
 import DeleteButton from './DeleteButton'
+import { generarPedidoDesdeFactura } from './actions'
 
 export default async function FacturasAdminPage({
   searchParams,
 }: {
-  searchParams: { mes?: string; cliente?: string; tipo?: string }
+  searchParams: { mes?: string; cliente?: string; tipo?: string; error?: string }
 }) {
   const supabase = createClient()
 
@@ -81,10 +82,16 @@ export default async function FacturasAdminPage({
           Gestión de facturas
         </h2>
         <p className="text-sm" style={{ color: '#5B5C60' }}>
-          Sube pares de XML + PDF. El sistema los empareja automáticamente por nombre y los asigna al
-          cliente por RFC.
+          Sube pares de XML + PDF. El sistema los empareja automáticamente por nombre, los asigna al
+          cliente por RFC, y crea el pedido con sus artículos leyendo el XML.
         </p>
       </div>
+
+      {searchParams.error && (
+        <div className="card" style={{ marginBottom: 16, borderColor: '#C2492A' }}>
+          <p className="text-sm" style={{ color: '#C2492A' }}>{searchParams.error}</p>
+        </div>
+      )}
 
       {/* Formulario de subida */}
       <UploadForm />
@@ -190,7 +197,7 @@ export default async function FacturasAdminPage({
                     Monto
                   </th>
                   <th style={{ padding: '10px 8px', fontFamily: 'var(--font-subtitle)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
-                    Folio fiscal
+                    Pedido
                   </th>
                   <th style={{ padding: '10px 8px', fontFamily: 'var(--font-subtitle)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
                     Archivos
@@ -226,13 +233,38 @@ export default async function FacturasAdminPage({
                     <td style={{ padding: '10px 8px', fontWeight: 500, whiteSpace: 'nowrap' }}>
                       {inv.monto ? fmtMoney(inv.monto) : '—'}
                     </td>
-                    <td style={{ padding: '10px 8px', fontSize: 11, fontFamily: 'var(--font-mono)', color: '#626F77' }}>
-                      {inv.folio_fiscal ? inv.folio_fiscal.slice(0, 8) + '…' : '—'}
+                    <td style={{ padding: '10px 8px' }}>
+                      {inv.order_id ? (
+                        <a href={`/admin/pedidos/${inv.order_id}`} style={{ fontSize: 12, fontWeight: 600, color: '#676F36', textDecoration: 'underline' }}>
+                          Ver pedido
+                        </a>
+                      ) : inv.tipo === 'factura' ? (
+                        <form action={generarPedidoDesdeFactura}>
+                          <input type="hidden" name="invoiceId" value={inv.id} />
+                          <button
+                            type="submit"
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: '#C2492A',
+                              border: '1px solid #C2492A',
+                              borderRadius: 3,
+                              padding: '3px 8px',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Generar pedido
+                          </button>
+                        </form>
+                      ) : (
+                        <span style={{ fontSize: 11, color: '#5B5C60' }}>—</span>
+                      )}
                     </td>
                     <td style={{ padding: '10px 8px' }}>
                       <div style={{ display: 'flex', gap: 8 }}>
                         {inv.pdfUrl && (
-                          <a
+                          
                             href={inv.pdfUrl}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -247,7 +279,7 @@ export default async function FacturasAdminPage({
                           </a>
                         )}
                         {inv.xmlUrl && (
-                          <a
+                          
                             href={inv.xmlUrl}
                             target="_blank"
                             rel="noopener noreferrer"
