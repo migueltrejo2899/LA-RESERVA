@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtDate, fmtMoney } from '@/lib/utils'
 import UploadForm from './UploadForm'
 import DeleteButton from './DeleteButton'
-import { generarPedidoDesdeFactura } from './actions'
+import { generarPedidoDesdeFactura, reLigarComplemento } from './actions'
 
 export default async function FacturasAdminPage({
   searchParams,
@@ -258,7 +258,24 @@ export default async function FacturasAdminPage({
                           </button>
                         </form>
                       ) : (
-                        <span style={{ fontSize: 11, color: '#5B5C60' }}>—</span>
+                        <form action={reLigarComplemento}>
+                          <input type="hidden" name="invoiceId" value={inv.id} />
+                          <button
+                            type="submit"
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: '#A57F9B',
+                              border: '1px solid #A57F9B',
+                              borderRadius: 3,
+                              padding: '3px 8px',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Ligar a pedido
+                          </button>
+                        </form>
                       )}
                     </td>
                     <td style={{ padding: '10px 8px' }}>
@@ -279,7 +296,7 @@ export default async function FacturasAdminPage({
                           </a>
                         )}
                         {inv.xmlUrl && (
-                          <a
+                         <a 
                             href={inv.xmlUrl}
                             target="_blank"
                             rel="noopener noreferrer"
