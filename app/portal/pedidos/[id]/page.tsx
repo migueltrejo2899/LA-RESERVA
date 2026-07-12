@@ -19,17 +19,16 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
   const { data: items } = await supabase.from('order_items').select('*').eq('order_id', order.id)
   const { data: history } = await supabase.from('order_status_history').select('*').eq('order_id', order.id).order('created_at', { ascending: false })
   const { data: payments } = await supabase.from('payments').select('*').eq('order_id', order.id).order('fecha', { ascending: false })
-
-  // Facturas y complementos de pago ligados a este pedido
-  const { data: invoicesRaw } = await supabase
+  const { data: invoices } = await supabase
     .from('invoices')
     .select('*')
     .eq('order_id', order.id)
     .eq('client_id', user!.id)
     .order('fecha', { ascending: false })
 
+  // URLs firmadas de descarga (válidas 1 hora) para cada archivo
   const invoicesWithUrls = await Promise.all(
-    (invoicesRaw || []).map(async (inv) => {
+    (invoices || []).map(async (inv) => {
       let url: string | undefined
       let xmlUrl: string | undefined
       if (inv.file_path) {
@@ -44,10 +43,7 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
     })
   )
 
-  const facturas = invoicesWithUrls.filter((i) => i.tipo === 'factura')
-  const complementosSueltos = invoicesWithUrls.filter(
-    (i) => i.tipo === 'complemento_pago' && !facturas.some((f) => f.id === i.factura_id)
-  )
+  const facturasDelPedido = invoicesWithUrls.filter((i) => i.tipo === 'factura')
 
   const paid = (payments || []).reduce((s, p) => s + Number(p.monto), 0)
   const saldo = order.total - paid
@@ -58,6 +54,7 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
 
       <div className="card">
         <div className="text-xs font-mono uppercase tracking-widest text-inksoft">{order.folio}</div>
+        <div className="text-sm text-inksoft mb-2">Creado {fmtDate(order.created_at)}</div>
         <div className="my-2"><span className={`stamp ${statusClass(order.status)}`}>{order.status}</span></div>
         <table className="w-full text-sm">
           <thead><tr className="text-xs font-mono uppercase text-inksoft border-b border-line">
@@ -93,13 +90,15 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
         <h3 className="font-display text-lg mb-3">Pagos</h3>
         <table className="w-full text-sm mb-3">
           <thead><tr className="text-xs font-mono uppercase text-inksoft border-b border-line">
-            <th className="text-left py-2">Fecha</th><th className="text-left">Monto</th><th className="text-left">Método</th>
+            <th className="text-left py-2">Fecha</th><th className="text-left">Monto</th><th className="text-left">Método</th><th className="text-left">Nota</th>
           </tr></thead>
           <tbody>
             {payments?.map((p) => (
-              <tr key={p.id} className="border-b border-line"><td className="py-2">{fmtDate(p.fecha)}</td><td>{fmtMoney(p.monto)}</td><td>{p.metodo}</td></tr>
+              <tr key={p.id} className="border-b border-line">
+                <td className="py-2">{fmtDate(p.fecha)}</td><td>{fmtMoney(p.monto)}</td><td>{p.metodo}</td><td className="text-inksoft">{p.nota}</td>
+              </tr>
             ))}
-            {(!payments || payments.length === 0) && <tr><td colSpan={3} className="text-inksoft py-2">Sin pagos registrados</td></tr>}
+            {(!payments || payments.length === 0) && <tr><td colSpan={4} className="text-inksoft py-2">Sin pagos registrados</td></tr>}
           </tbody>
         </table>
         <div className="flex justify-between font-mono text-sm"><span>Pagado</span><span>{fmtMoney(paid)}</span></div>
@@ -107,90 +106,40 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
       </div>
 
       <div className="card">
-        <h3 className="font-display text-lg mb-3">Facturas y complementos de este pedido</h3>
-
-        {facturas.length === 0 && complementosSueltos.length === 0 ? (
-          <p className="text-sm text-inksoft">Todavía no hay facturas registradas para este pedido.</p>
-        ) : (
-          <div className="space-y-4">
-            {facturas.map((f) => {
-              const complementos = invoicesWithUrls.filter(
-                (i) => i.tipo === 'complemento_pago' && i.factura_id === f.id
-              )
-              return (
-                <div key={f.id} className="border border-line rounded p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <span className="stamp" style={{ fontSize: 10 }}>Factura</span>
-                      <span className="text-sm ml-2 font-mono text-inksoft">{fmtDate(f.fecha)}</span>
-                    </div>
-                    <div className="font-mono text-sm font-semibold">{fmtMoney(f.monto)}</div>
+        <h3 className="font-display text-lg mb-3">Facturas y complementos de pago</h3>
+        <div className="divide-y divide-line">
+          {invoicesWithUrls.map((inv) => {
+            const facturaLigada = inv.tipo !== 'factura' && inv.factura_id
+              ? facturasDelPedido.find((f) => f.id === inv.factura_id)
+              : null
+            return (
+              <div key={inv.id} className="py-3 flex justify-between items-center flex-wrap gap-2">
+                <div>
+                  <span className={`stamp ${inv.tipo === 'factura' ? 'entregado' : 'preparacion'}`}>
+                    {inv.tipo === 'factura' ? 'Factura' : 'Complemento de pago'}
+                  </span>
+                  <div className="text-sm mt-1">
+                    {inv.file_name} · {fmtDate(inv.fecha)}{inv.monto ? ` · ${fmtMoney(inv.monto)}` : ''}
                   </div>
-                  <div className="flex gap-4 mt-2">
-                    {f.url && (
-                      <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-crate underline text-sm font-mono">
-                        Descargar PDF
-                      </a>
-                    )}
-                    {f.xmlUrl && (
-                      <a href={f.xmlUrl} target="_blank" rel="noopener noreferrer" className="text-inksoft underline text-sm font-mono">
-                        Descargar XML
-                      </a>
-                    )}
-                  </div>
-
-                  {complementos.length > 0 && (
-                    <div className="mt-3 pl-4 border-l-2 border-line space-y-2">
-                      <div className="text-xs font-mono uppercase text-inksoft">Complementos de pago</div>
-                      {complementos.map((c) => (
-                        <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                          <span className="font-mono text-inksoft">{fmtDate(c.fecha)}</span>
-                          <span className="font-mono">{fmtMoney(c.monto)}</span>
-                          <div className="flex gap-3">
-                            {c.url && (
-                              <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-crate underline font-mono">
-                                PDF
-                              </a>
-                            )}
-                            {c.xmlUrl && (
-                              <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" className="text-inksoft underline font-mono">
-                                XML
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                  {inv.tipo !== 'factura' && (
+                    <div className="text-xs text-inksoft mt-1">
+                      {facturaLigada ? `Ligado a: ${facturaLigada.file_name}` : 'Sin factura ligada'}
                     </div>
                   )}
                 </div>
-              )
-            })}
-
-            {complementosSueltos.length > 0 && (
-              <div className="border border-line rounded p-3">
-                <div className="text-xs font-mono uppercase text-inksoft mb-2">Complementos sin factura asociada</div>
-                {complementosSueltos.map((c) => (
-                  <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm mb-1">
-                    <span className="font-mono text-inksoft">{fmtDate(c.fecha)}</span>
-                    <span className="font-mono">{fmtMoney(c.monto)}</span>
-                    <div className="flex gap-3">
-                      {c.url && (
-                        <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-crate underline font-mono">
-                          PDF
-                        </a>
-                      )}
-                      {c.xmlUrl && (
-                        <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" className="text-inksoft underline font-mono">
-                          XML
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                <div className="flex gap-2">
+                  {inv.url && <a href={inv.url} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
+                  {inv.xmlUrl && inv.xml_path !== inv.file_path && (
+                    <a href={inv.xmlUrl} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
-        )}
+            )
+          })}
+          {(!invoices || invoices.length === 0) && (
+            <p className="text-inksoft text-sm py-2">Sin facturas ni complementos anexados a este pedido.</p>
+          )}
+        </div>
       </div>
     </div>
   )
