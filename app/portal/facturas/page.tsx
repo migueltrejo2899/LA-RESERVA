@@ -11,11 +11,16 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
     .eq('client_id', user!.id)
     .order('fecha', { ascending: false })
 
-  // generar URLs firmadas (validas 1 hora) para cada archivo
+  // generar URLs firmadas (validas 1 hora) para cada archivo (PDF y XML si existe)
   const withUrls = await Promise.all(
     (invoices || []).map(async (inv) => {
       const { data: signed } = await supabase.storage.from('facturas').createSignedUrl(inv.file_path, 3600)
-      return { ...inv, url: signed?.signedUrl }
+      let xmlUrl: string | undefined
+      if (inv.xml_path) {
+        const { data: signedXml } = await supabase.storage.from('facturas').createSignedUrl(inv.xml_path, 3600)
+        xmlUrl = signedXml?.signedUrl
+      }
+      return { ...inv, url: signed?.signedUrl, xmlUrl }
     })
   )
 
@@ -67,11 +72,18 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
                     {fmtDate(factura.fecha)} {factura.monto ? `· ${fmtMoney(factura.monto)}` : ''}
                   </div>
                 </div>
-                {factura.url && (
-                  <a href={factura.url} target="_blank" rel="noopener noreferrer" className="btn small">
-                    Descargar factura
-                  </a>
-                )}
+                <div className="flex gap-2">
+                  {factura.url && (
+                    <a href={factura.url} target="_blank" rel="noopener noreferrer" className="btn small">
+                      Descargar PDF
+                    </a>
+                  )}
+                  {factura.xmlUrl && (
+                    <a href={factura.xmlUrl} target="_blank" rel="noopener noreferrer" className="btn small ghost">
+                      Descargar XML
+                    </a>
+                  )}
+                </div>
               </div>
 
               {complementos.length > 0 && (
@@ -84,11 +96,18 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
                           {fmtDate(c.fecha)} {c.monto ? `· ${fmtMoney(c.monto)}` : ''}
                         </div>
                       </div>
-                      {c.url && (
-                        <a href={c.url} target="_blank" rel="noopener noreferrer" className="btn small ghost">
-                          Descargar complemento
-                        </a>
-                      )}
+                      <div className="flex gap-2">
+                        {c.url && (
+                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="btn small ghost">
+                            Descargar PDF
+                          </a>
+                        )}
+                        {c.xmlUrl && (
+                          <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" className="btn small ghost">
+                            Descargar XML
+                          </a>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -108,11 +127,18 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
                         {fmtDate(c.fecha)} {c.monto ? `· ${fmtMoney(c.monto)}` : ''}
                       </div>
                     </div>
-                    {c.url && (
-                      <a href={c.url} target="_blank" rel="noopener noreferrer" className="btn small ghost">
-                        Descargar complemento
-                      </a>
-                    )}
+                    <div className="flex gap-2">
+                      {c.url && (
+                        <a href={c.url} target="_blank" rel="noopener noreferrer" className="btn small ghost">
+                          Descargar PDF
+                        </a>
+                      )}
+                      {c.xmlUrl && (
+                        <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" className="btn small ghost">
+                          Descargar XML
+                        </a>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
