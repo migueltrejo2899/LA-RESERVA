@@ -1,194 +1,110 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { usernameToEmail } from '@/lib/utils'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
-export async function updateStatus(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const status = String(formData.get('status') || '')
-  const note = String(formData.get('note') || '')
+export async function createClientUser(formData: FormData) {
+  const usernameRaw = String(formData.get('username') || '').trim()
+  const username = usernameRaw
+    .toLowerCase()
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-9._-]/g, '')
+  const password = String(formData.get('password') || '')
+  const name = String(formData.get('name') || '').trim()
+  const contact = String(formData.get('contact') || '').trim()
+  const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
 
-  await supabase.from('orders').update({ status }).eq('id', orderId)
-  await supabase.from('order_status_history').insert({ order_id: orderId, status, note })
-
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
-
-export async function addPayment(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const monto = Number(formData.get('monto'))
-  const fecha = String(formData.get('fecha') || '')
-  const metodo = String(formData.get('metodo') || '')
-  const nota = String(formData.get('nota') || '')
-
-  if (!monto || monto <= 0) {
-    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent('Ingresa un monto válido.')}`)
+  if (!usernameRaw || !username || !password || !name) {
+    redirect('/admin/clientes?error=' + encodeURIComponent('Usuario, contraseña y nombre son obligatorios.'))
+  }
+  if (password.length < 6) {
+    redirect('/admin/clientes?error=' + encodeURIComponent('La contraseña debe tener al menos 6 caracteres.'))
   }
 
-  await supabase.from('payments').insert({ order_id: orderId, monto, fecha, metodo, nota })
+  const admin = createAdminClient()
 
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
-
-export async function uploadInvoice(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const clientId = String(formData.get('clientId') || '')
-  const tipo = String(formData.get('tipo') || 'factura')
-  const fecha = String(formData.get('fecha') || '')
-  const monto = formData.get('monto') ? Number(formData.get('monto')) : null
-  const file = formData.get('file') as File
-  const facturaIdRaw = String(formData.get('facturaId') || '')
-  const facturaId = tipo === 'complemento_pago' && facturaIdRaw ? facturaIdRaw : null
-
-  if (!file || file.size === 0) {
-    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent('Selecciona un archivo (PDF o XML).')}`)
-  }
-
-  const path = `${clientId}/${Date.now()}-${file.name}`
-  const { error: uploadError } = await supabase.storage.from('facturas').upload(path, file)
-
-  if (uploadError) {
-    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent(uploadError.message)}`)
-  }
-
-  await supabase.from('invoices').insert({
-    client_id: clientId,
-    order_id: orderId,
-    tipo,
-    fecha,
-    monto,
-    file_path: path,
-    file_name: file.name,
-    factura_id: facturaId,
+  const { data: authUser, error: authError } = await admin.auth.admin.createUser({
+    email: usernameToEmail(username),
+    password,
+    email_confirm: true,
   })
 
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
-
-export async function updateInvoice(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const invoiceId = String(formData.get('invoiceId') || '')
-  const tipo = String(formData.get('tipo') || 'factura')
-  const fecha = String(formData.get('fecha') || '')
-  const monto = formData.get('monto') ? Number(formData.get('monto')) : null
-  const facturaIdRaw = String(formData.get('facturaId') || '')
-  const facturaId = tipo === 'complemento_pago' && facturaIdRaw ? facturaIdRaw : null
-
-  await supabase.from('invoices').update({ tipo, fecha, monto, factura_id: facturaId }).eq('id', invoiceId)
-
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
-
-export async function deleteInvoice(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const invoiceId = String(formData.get('invoiceId') || '')
-  const filePath = String(formData.get('filePath') || '')
-
-  if (filePath) {
-    await supabase.storage.from('facturas').remove([filePath])
-  }
-  await supabase.from('invoices').delete().eq('id', invoiceId)
-
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
-
-async function recalcOrderTotal(supabase: ReturnType<typeof createClient>, orderId: string) {
-  const { data: items } = await supabase.from('order_items').select('cantidad, precio').eq('order_id', orderId)
-  const total = (items || []).reduce((s, it) => s + Number(it.cantidad) * Number(it.precio), 0)
-  await supabase.from('orders').update({ total }).eq('id', orderId)
-}
-
-export async function updateOrderItem(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const itemId = String(formData.get('itemId') || '')
-  const producto = String(formData.get('producto') || '').trim()
-  const cantidad = Number(formData.get('cantidad'))
-  const precio = Number(formData.get('precio'))
-
-  if (!producto || !cantidad || cantidad <= 0) {
-    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent('Producto y cantidad válidos son obligatorios.')}`)
+  if (authError || !authUser.user) {
+    redirect('/admin/clientes?error=' + encodeURIComponent(authError?.message || 'No se pudo crear el usuario (¿el usuario ya existe?).'))
   }
 
-  await supabase.from('order_items').update({ producto, cantidad, precio }).eq('id', itemId)
-  await recalcOrderTotal(supabase, orderId)
+  const { error: profileError } = await admin.from('profiles').insert({
+    id: authUser.user!.id,
+    role: 'client',
+    username,
+    name,
+    contact,
+    rfc: rfc || null,
+  })
 
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
-
-export async function deleteOrderItem(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const itemId = String(formData.get('itemId') || '')
-
-  const { count } = await supabase.from('order_items').select('id', { count: 'exact', head: true }).eq('order_id', orderId)
-  if ((count || 0) <= 1) {
-    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent('El pedido debe tener al menos un artículo.')}`)
+  if (profileError) {
+    // revertir el usuario de auth si falla el perfil, para no dejar huérfanos
+    await admin.auth.admin.deleteUser(authUser.user!.id)
+    redirect('/admin/clientes?error=' + encodeURIComponent(profileError.message))
   }
 
-  await supabase.from('order_items').delete().eq('id', itemId)
-  await recalcOrderTotal(supabase, orderId)
-
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
+  revalidatePath('/admin/clientes')
+  redirect('/admin/clientes')
 }
 
-export async function addOrderItem(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const producto = String(formData.get('producto') || '').trim()
-  const cantidad = Number(formData.get('cantidad'))
-  const precio = Number(formData.get('precio'))
+export async function updateClientPassword(formData: FormData) {
+  const clientId = String(formData.get('clientId') || '')
+  const newPassword = String(formData.get('newPassword') || '')
 
-  if (!producto || !cantidad || cantidad <= 0) {
-    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent('Producto y cantidad válidos son obligatorios.')}`)
+  if (newPassword.length < 6) {
+    redirect('/admin/clientes?error=' + encodeURIComponent('La nueva contraseña debe tener al menos 6 caracteres.'))
   }
 
-  await supabase.from('order_items').insert({ order_id: orderId, producto, cantidad, precio: precio || 0 })
-  await recalcOrderTotal(supabase, orderId)
-
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
+  const admin = createAdminClient()
+  const { error } = await admin.auth.admin.updateUserById(clientId, { password: newPassword })
+  if (error) {
+    redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
+  }
+  revalidatePath('/admin/clientes')
+  redirect('/admin/clientes')
 }
 
-export async function updatePayment(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const paymentId = String(formData.get('paymentId') || '')
-  const monto = Number(formData.get('monto'))
-  const fecha = String(formData.get('fecha') || '')
-  const metodo = String(formData.get('metodo') || '')
-  const nota = String(formData.get('nota') || '')
+export async function updateClientInfo(formData: FormData) {
+  const clientId = String(formData.get('clientId') || '')
+  const name = String(formData.get('name') || '').trim()
+  const contact = String(formData.get('contact') || '').trim()
+  const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
 
-  if (!monto || monto <= 0) {
-    redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent('Ingresa un monto válido.')}`)
+  const admin = createAdminClient()
+  const { error } = await admin.from('profiles').update({ name, contact, rfc: rfc || null }).eq('id', clientId)
+  if (error) {
+    redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
+  }
+  revalidatePath('/admin/clientes')
+  redirect('/admin/clientes')
+}
+
+// Elimina por completo a un cliente: su usuario, su perfil, y en cascada
+// (por las llaves foráneas de la base de datos) también sus pedidos, pagos,
+// historial y facturas/complementos. También borra sus archivos del storage.
+// Es irreversible.
+export async function deleteClient(formData: FormData) {
+  const clientId = String(formData.get('clientId') || '')
+  const admin = createAdminClient()
+
+  const { data: archivos } = await admin.storage.from('facturas').list(clientId)
+  if (archivos && archivos.length > 0) {
+    const paths = archivos.map((a) => `${clientId}/${a.name}`)
+    await admin.storage.from('facturas').remove(paths)
   }
 
-  await supabase.from('payments').update({ monto, fecha, metodo, nota }).eq('id', paymentId)
+  const { error } = await admin.auth.admin.deleteUser(clientId)
+  if (error) {
+    redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
+  }
 
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
-}
-
-export async function deletePayment(formData: FormData) {
-  const supabase = createClient()
-  const orderId = String(formData.get('orderId') || '')
-  const paymentId = String(formData.get('paymentId') || '')
-
-  await supabase.from('payments').delete().eq('id', paymentId)
-
-  revalidatePath(`/admin/pedidos/${orderId}`)
-  redirect(`/admin/pedidos/${orderId}`)
+  revalidatePath('/admin/clientes')
+  redirect('/admin/clientes')
 }
