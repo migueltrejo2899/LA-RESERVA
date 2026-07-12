@@ -135,6 +135,8 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
             .eq('folio_fiscal', relacion.idDocumentoRelacionado)
             .maybeSingle()
           facturaIdRelacionada = facturaRelacionada?.id || null
+          // el complemento hereda el pedido de la factura que paga
+          orderId = facturaRelacionada?.order_id || null
         }
       } else {
         const factura = parseFacturaXML(xmlText)
@@ -285,4 +287,64 @@ export async function generarPedidoDesdeFactura(formData: FormData) {
   revalidatePath('/admin/facturas')
   revalidatePath('/admin/pedidos')
   redirect(`/admin/pedidos/${orderId}`)
+}
+
+// Para complementos de pago ya registrados que se quedaron sin pedido
+// (por ejemplo, subidos antes de esta corrección): busca su factura
+// relacionada (por factura_id, o re-leyendo el XML guardado si hace falta)
+// y copia el pedido de esa factura al complemento.
+export async function reLigarComplemento(formData: FormData) {
+  const supabase = createClient()
+  const invoiceId = String(formData.get('invoiceId') || '')
+
+  const { data: inv } = await supabase.from('invoices').select('*').eq('id', invoiceId).single()
+
+  if (!inv || inv.tipo !== 'complemento_pago') {
+    redirect('/admin/facturas?error=' + encodeURIComponent('Registro no válido.'))
+  }
+
+  let facturaMatch: { id: string; order_id: string | null } | null = null
+
+  if (inv!.factura_id) {
+    const { data } = await supabase.from('invoices').select('id, order_id').eq('id', inv!.factura_id).maybeSingle()
+    facturaMatch = data
+  }
+
+  if (!facturaMatch) {
+    const xmlPathToUse = inv!.xml_path || (inv!.file_name?.toLowerCase().endsWith('.xml') ? inv!.file_path : null)
+    if (xmlPathToUse) {
+      const { data: xmlBlob } = await supabase.storage.from('facturas').download(xmlPathToUse)
+      if (xmlBlob) {
+        try {
+          const xmlText = await xmlBlob.text()
+          const comp = parseComplementoPagoXML(xmlText)
+          const relacion = comp.pagosRelacionados[0]
+          if (relacion?.idDocumentoRelacionado) {
+            const { data } = await supabase
+              .from('invoices')
+              .select('id, order_id')
+              .eq('tipo', 'factura')
+              .eq('folio_fiscal', relacion.idDocumentoRelacionado)
+              .maybeSingle()
+            facturaMatch = data
+          }
+        } catch {
+          // si el XML no se puede leer, seguimos y reportamos abajo que no se encontró
+        }
+      }
+    }
+  }
+
+  if (!facturaMatch) {
+    redirect('/admin/facturas?error=' + encodeURIComponent('No se encontró la factura relacionada con este complemento.'))
+  }
+
+  await supabase
+    .from('invoices')
+    .update({ factura_id: facturaMatch!.id, order_id: facturaMatch!.order_id })
+    .eq('id', invoiceId)
+
+  revalidatePath('/admin/facturas')
+  revalidatePath('/admin/pedidos')
+  redirect(facturaMatch!.order_id ? `/admin/pedidos/${facturaMatch!.order_id}` : '/admin/facturas')
 }
