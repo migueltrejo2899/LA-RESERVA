@@ -1,9 +1,10 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { parseFacturaXML, parseComplementoPagoXML } from '@/lib/cfdi'
+import { parseFacturaXML, parseComplementoPagoXML, type ConceptoCFDI } from '@/lib/cfdi'
 import { XMLParser } from 'fast-xml-parser'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 
 export type UploadResult = {
   fileName: string
@@ -30,10 +31,39 @@ function inspeccionarXML(xmlText: string) {
   return { esComplemento: tipoComprobante === 'P', rfcReceptor }
 }
 
+async function crearPedidoDesdeConceptos(
+  supabase: ReturnType<typeof createClient>,
+  clientId: string,
+  fecha: string,
+  total: number,
+  conceptos: ConceptoCFDI[],
+  nota: string
+): Promise<string | null> {
+  if (conceptos.length === 0) return null
+
+  const { count } = await supabase.from('orders').select('id', { count: 'exact', head: true })
+  const folio = 'PED-' + String((count || 0) + 1).padStart(4, '0')
+
+  const { data: order } = await supabase
+    .from('orders')
+    .insert({ folio, client_id: clientId, total, status: 'Recibido', created_at: fecha })
+    .select()
+    .single()
+
+  if (!order) return null
+
+  await supabase.from('order_items').insert(
+    conceptos.map((c) => ({ order_id: order.id, producto: c.producto, cantidad: c.cantidad, precio: c.precio }))
+  )
+  await supabase.from('order_status_history').insert({ order_id: order.id, status: 'Recibido', note: nota })
+
+  return order.id
+}
+
 // Sube uno o varios pares de archivos (XML + PDF con el mismo nombre base).
-// Cada factura se asigna al cliente cuyo RFC coincida con el receptor del XML.
-// Cada complemento de pago, además, se liga automáticamente a la factura que
-// paga (buscando el folio fiscal relacionado dentro del propio XML).
+// Cada factura se asigna al cliente cuyo RFC coincida con el receptor del XML,
+// y además se crea automáticamente su pedido con los artículos leídos del XML.
+// Cada complemento de pago se liga automáticamente a la factura que paga.
 export async function bulkUploadInvoices(formData: FormData): Promise<UploadResult[]> {
   const supabase = createClient()
   const files = formData.getAll('files') as File[]
@@ -87,6 +117,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
       let monto: number | null = null
       let folioFiscal = ''
       let facturaIdRelacionada: string | null = null
+      let orderId: string | null = null
 
       if (esComplemento) {
         const comp = parseComplementoPagoXML(xmlText)
@@ -99,7 +130,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
         if (relacion?.idDocumentoRelacionado) {
           const { data: facturaRelacionada } = await supabase
             .from('invoices')
-            .select('id')
+            .select('id, order_id')
             .eq('tipo', 'factura')
             .eq('folio_fiscal', relacion.idDocumentoRelacionado)
             .maybeSingle()
@@ -111,6 +142,16 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
         fecha = factura.fecha
         monto = factura.total
         folioFiscal = factura.uuid
+
+        // crea automáticamente el pedido de esta factura, con sus artículos
+        orderId = await crearPedidoDesdeConceptos(
+          supabase,
+          clienteMatch.id,
+          factura.fecha,
+          factura.total,
+          factura.conceptos,
+          'Pedido creado automáticamente al subir la factura'
+        )
       }
 
       if (!folioFiscal) {
@@ -148,6 +189,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
 
       await supabase.from('invoices').insert({
         client_id: clienteMatch.id,
+        order_id: orderId,
         tipo,
         fecha,
         monto,
@@ -166,6 +208,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
   }
 
   revalidatePath('/admin/facturas')
+  revalidatePath('/admin/pedidos')
   return results
 }
 
@@ -183,4 +226,63 @@ export async function deleteInvoice(formData: FormData) {
   await supabase.from('invoices').delete().eq('id', invoiceId)
 
   revalidatePath('/admin/facturas')
+}
+
+// Para facturas que ya estaban registradas ANTES de que existiera esta
+// función (subidas sin generar su pedido): lee su XML ya guardado en el
+// storage y crea el pedido retroactivamente.
+export async function generarPedidoDesdeFactura(formData: FormData) {
+  const supabase = createClient()
+  const invoiceId = String(formData.get('invoiceId') || '')
+
+  const { data: inv } = await supabase.from('invoices').select('*').eq('id', invoiceId).single()
+
+  if (!inv) {
+    redirect('/admin/facturas?error=' + encodeURIComponent('Factura no encontrada.'))
+  }
+  if (inv!.order_id) {
+    redirect('/admin/facturas?error=' + encodeURIComponent('Esta factura ya tiene un pedido asignado.'))
+  }
+
+  const xmlPathToUse = inv!.xml_path || (inv!.file_name?.toLowerCase().endsWith('.xml') ? inv!.file_path : null)
+  if (!xmlPathToUse) {
+    redirect('/admin/facturas?error=' + encodeURIComponent('Esta factura no tiene un XML guardado, no se puede generar el pedido.'))
+  }
+
+  const { data: xmlBlob, error: downloadError } = await supabase.storage.from('facturas').download(xmlPathToUse!)
+  if (downloadError || !xmlBlob) {
+    redirect('/admin/facturas?error=' + encodeURIComponent('No se pudo leer el XML guardado.'))
+  }
+
+  const xmlText = await xmlBlob!.text()
+
+  let factura
+  try {
+    factura = parseFacturaXML(xmlText)
+  } catch (e: any) {
+    redirect('/admin/facturas?error=' + encodeURIComponent('No se pudo interpretar el XML: ' + (e?.message || e)))
+  }
+
+  if (!factura || factura.conceptos.length === 0) {
+    redirect('/admin/facturas?error=' + encodeURIComponent('El XML no tiene conceptos (artículos) para crear el pedido.'))
+  }
+
+  const orderId = await crearPedidoDesdeConceptos(
+    supabase,
+    inv!.client_id,
+    factura!.fecha,
+    factura!.total || inv!.monto || 0,
+    factura!.conceptos,
+    'Pedido generado automáticamente desde una factura ya registrada'
+  )
+
+  if (!orderId) {
+    redirect('/admin/facturas?error=' + encodeURIComponent('No se pudo crear el pedido.'))
+  }
+
+  await supabase.from('invoices').update({ order_id: orderId }).eq('id', invoiceId)
+
+  revalidatePath('/admin/facturas')
+  revalidatePath('/admin/pedidos')
+  redirect(`/admin/pedidos/${orderId}`)
 }
