@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { createOrder } from './actions'
+import { createOrder, createOrderFromFactura } from './actions'
 import ItemsForm from './ItemsForm'
 import { fmtDate, fmtMoney, statusClass, paymentStatus } from '@/lib/utils'
 import Link from 'next/link'
@@ -13,6 +13,35 @@ export default async function PedidosPage({ searchParams }: { searchParams: { er
     .from('orders')
     .select('id, folio, total, status, created_at, client_id, profiles(name), payments(monto)')
     .order('created_at', { ascending: false })
+
+  if (searchParams.nuevo === 'factura') {
+    return (
+      <div className="card">
+        <h3 className="font-display text-lg mb-4">Nuevo pedido desde factura (XML)</h3>
+        <p className="text-sm text-inksoft mb-4">
+          Sube el XML (y el PDF si lo tienes) de la factura ya timbrada. El pedido, sus artículos, la fecha
+          y el total se llenan automáticamente leyendo el XML.
+        </p>
+        <form action={createOrderFromFactura} className="field" encType="multipart/form-data">
+          <label>Cliente</label>
+          <select name="clientId" className="mb-4">
+            {clients?.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} ({c.username})</option>
+            ))}
+          </select>
+          <label>Archivo XML de la factura</label>
+          <input type="file" name="xml" accept=".xml" className="mb-4" />
+          <label>Archivo PDF de la factura (opcional)</label>
+          <input type="file" name="pdf" accept=".pdf" className="mb-4" />
+          {searchParams.error && <div className="text-stamp text-sm font-mono mb-4">{searchParams.error}</div>}
+          <div className="flex gap-3">
+            <button className="btn">Crear pedido desde factura</button>
+            <Link href="/admin/pedidos" className="btn ghost">Cancelar</Link>
+          </div>
+        </form>
+      </div>
+    )
+  }
 
   if (searchParams.nuevo === '1') {
     return (
@@ -40,9 +69,12 @@ export default async function PedidosPage({ searchParams }: { searchParams: { er
 
   return (
     <div className="card">
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <h3 className="font-display text-lg">Pedidos registrados</h3>
-        <Link href="/admin/pedidos?nuevo=1" className="btn small">+ Nuevo pedido</Link>
+        <div className="flex gap-2">
+          <Link href="/admin/pedidos?nuevo=factura" className="btn small ghost">+ Desde factura XML</Link>
+          <Link href="/admin/pedidos?nuevo=1" className="btn small">+ Nuevo pedido</Link>
+        </div>
       </div>
       {(!orders || orders.length === 0) && <p className="text-inksoft text-sm">Aún no hay pedidos.</p>}
       <div className="divide-y divide-line">
