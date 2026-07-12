@@ -45,7 +45,6 @@ export async function createClientUser(formData: FormData) {
   })
 
   if (profileError) {
-    // revertir el usuario de auth si falla el perfil, para no dejar huérfanos
     await admin.auth.admin.deleteUser(authUser.user!.id)
     redirect('/admin/clientes?error=' + encodeURIComponent(profileError.message))
   }
@@ -82,6 +81,25 @@ export async function updateClientInfo(formData: FormData) {
   if (error) {
     redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
   }
+  revalidatePath('/admin/clientes')
+  redirect('/admin/clientes')
+}
+
+export async function deleteClient(formData: FormData) {
+  const clientId = String(formData.get('clientId') || '')
+  const admin = createAdminClient()
+
+  const { data: archivos } = await admin.storage.from('facturas').list(clientId)
+  if (archivos && archivos.length > 0) {
+    const paths = archivos.map((a) => `${clientId}/${a.name}`)
+    await admin.storage.from('facturas').remove(paths)
+  }
+
+  const { error } = await admin.auth.admin.deleteUser(clientId)
+  if (error) {
+    redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
+  }
+
   revalidatePath('/admin/clientes')
   redirect('/admin/clientes')
 }
