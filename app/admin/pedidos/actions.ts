@@ -89,7 +89,7 @@ export async function createOrderFromFactura(formData: FormData) {
   const { data: existente } = await supabase
     .from('invoices')
     .select('id')
-    .eq('uuid_cfdi', factura!.uuid)
+    .eq('folio_fiscal', factura!.uuid)
     .maybeSingle()
 
   if (existente) {
@@ -157,7 +157,7 @@ export async function createOrderFromFactura(formData: FormData) {
     file_name: fileName,
     xml_path: xmlPathCol,
     xml_name: xmlNameCol,
-    uuid_cfdi: factura!.uuid,
+    folio_fiscal: factura!.uuid,
   })
 
   revalidatePath('/admin/pedidos')
