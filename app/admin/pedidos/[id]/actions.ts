@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { parseComplementoPagoXML } from '@/lib/cfdi'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
@@ -28,9 +29,13 @@ export async function deleteOrder(formData: FormData) {
   const supabase = createClient()
   const orderId = String(formData.get('orderId') || '')
 
+  // borra primero lo que depende del pedido (por si la base de datos no
+  // tiene el "on delete cascade" activo en alguna instalación vieja)
   await supabase.from('order_items').delete().eq('order_id', orderId)
   await supabase.from('order_status_history').delete().eq('order_id', orderId)
   await supabase.from('payments').delete().eq('order_id', orderId)
+  // las facturas/complementos NO se borran: se desligan del pedido pero
+  // el cliente sigue viéndolos en su historial de facturas.
   await supabase.from('invoices').update({ order_id: null }).eq('order_id', orderId)
 
   await supabase.from('orders').delete().eq('id', orderId)
@@ -85,19 +90,40 @@ export async function addPayment(formData: FormData) {
   redirect(`/admin/pedidos/${orderId}`)
 }
 
+// Sube un archivo (PDF o XML) y lo anexa al pedido. Si es un complemento de
+// pago y el archivo es un XML, se lee el monto pagado directo del XML
+// (en vez de confiar en lo que el admin escriba a mano) y se registra el
+// pago correspondiente en el pedido automáticamente.
 export async function uploadInvoice(formData: FormData) {
   const supabase = createClient()
   const orderId = String(formData.get('orderId') || '')
   const clientId = String(formData.get('clientId') || '')
   const tipo = String(formData.get('tipo') || 'factura')
-  const fecha = String(formData.get('fecha') || '')
-  const monto = formData.get('monto') ? Number(formData.get('monto')) : null
+  let fecha = String(formData.get('fecha') || '')
+  let monto = formData.get('monto') ? Number(formData.get('monto')) : null
   const file = formData.get('file') as File
   const facturaIdRaw = String(formData.get('facturaId') || '')
   const facturaId = tipo === 'complemento_pago' && facturaIdRaw ? facturaIdRaw : null
 
   if (!file || file.size === 0) {
     redirect(`/admin/pedidos/${orderId}?error=${encodeURIComponent('Selecciona un archivo (PDF o XML).')}`)
+  }
+
+  let folioFiscal: string | null = null
+
+  // si es un complemento de pago y el archivo subido es el XML, tomamos el
+  // monto pagado y la fecha directo de ahí en vez de lo escrito a mano
+  if (tipo === 'complemento_pago' && file.name.toLowerCase().endsWith('.xml')) {
+    try {
+      const xmlText = await file.text()
+      const comp = parseComplementoPagoXML(xmlText)
+      const relacion = comp.pagosRelacionados[0]
+      monto = relacion?.importePagado || comp.montoTotal || monto
+      fecha = comp.fecha || fecha
+      folioFiscal = comp.uuid || null
+    } catch {
+      // si el XML no se pudo leer, seguimos con lo que el admin haya escrito a mano
+    }
   }
 
   const path = `${clientId}/${Date.now()}-${file.name}`
@@ -116,7 +142,20 @@ export async function uploadInvoice(formData: FormData) {
     file_path: path,
     file_name: file.name,
     factura_id: facturaId,
+    ...(folioFiscal ? { folio_fiscal: folioFiscal } : {}),
   })
+
+  // si es un complemento de pago con un monto conocido, registramos el
+  // pago correspondiente en este pedido de forma automática
+  if (tipo === 'complemento_pago' && monto && monto > 0) {
+    await supabase.from('payments').insert({
+      order_id: orderId,
+      monto,
+      fecha,
+      metodo: 'Complemento de pago',
+      nota: 'Pago registrado automáticamente al subir el complemento de pago',
+    })
+  }
 
   revalidatePath(`/admin/pedidos/${orderId}`)
   redirect(`/admin/pedidos/${orderId}`)
