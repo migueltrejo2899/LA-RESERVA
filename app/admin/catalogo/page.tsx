@@ -71,4 +71,19 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                     <input type="text" name="descripcion" defaultValue={p.descripcion || ''} />
                   </div>
                   <label className="flex items-center gap-2 col-span-2 text-sm">
-                    <input type="checkbox" name="activo" defaultChecked={p.activo}
+                    <input type="checkbox" name="activo" defaultChecked={p.activo} /> Producto activo
+                  </label>
+                  <button className="btn small w-fit col-span-2">Guardar cambios</button>
+                </form>
+                <form action={deleteProduct}>
+                  <input type="hidden" name="id" value={p.id} />
+                  <button className="btn danger small">Eliminar producto</button>
+                </form>
+              </div>
+            </details>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
