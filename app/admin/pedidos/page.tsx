@@ -4,15 +4,14 @@ import ItemsForm from './ItemsForm'
 import { fmtDate, fmtMoney, statusClass, paymentStatus } from '@/lib/utils'
 import Link from 'next/link'
 
-export default async function PedidosPage({ searchParams }: { searchParams: { error?: string; nuevo?: string } }) {
+export default async function PedidosPage({
+  searchParams,
+}: {
+  searchParams: { error?: string; nuevo?: string; cliente?: string; estado?: string }
+}) {
   const supabase = createClient()
 
   const { data: clients } = await supabase.from('profiles').select('id, name, username').eq('role', 'client').order('name')
-
-  const { data: orders } = await supabase
-    .from('orders')
-    .select('id, folio, total, status, created_at, client_id, profiles(name), payments(monto)')
-    .order('created_at', { ascending: false })
 
   if (searchParams.nuevo === 'factura') {
     return (
@@ -67,6 +66,29 @@ export default async function PedidosPage({ searchParams }: { searchParams: { er
     )
   }
 
+  let query = supabase
+    .from('orders')
+    .select('id, folio, total, status, created_at, client_id, profiles(name), payments(monto)')
+    .order('created_at', { ascending: false })
+
+  if (searchParams.cliente) {
+    query = query.eq('client_id', searchParams.cliente)
+  }
+
+  const { data: ordersRaw } = await query
+
+  const orders = (ordersRaw || []).map((o: any) => {
+    const paid = (o.payments || []).reduce((s: number, p: any) => s + Number(p.monto), 0)
+    return { ...o, paid, saldo: Number(o.total) - paid, estadoPago: paymentStatus(o.total, paid) }
+  })
+
+  const filtrados =
+    searchParams.estado && ['pendiente', 'parcial', 'pagado'].includes(searchParams.estado)
+      ? orders.filter((o) => o.estadoPago === searchParams.estado)
+      : orders
+
+  const hayFiltro = searchParams.cliente || searchParams.estado
+
   return (
     <div className="card">
       <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
@@ -76,24 +98,55 @@ export default async function PedidosPage({ searchParams }: { searchParams: { er
           <Link href="/admin/pedidos?nuevo=1" className="btn small">+ Nuevo pedido</Link>
         </div>
       </div>
-      {(!orders || orders.length === 0) && <p className="text-inksoft text-sm">Aún no hay pedidos.</p>}
+
+      <form className="field flex flex-wrap gap-4 items-end mb-5" method="get">
+        <div style={{ minWidth: 200 }}>
+          <label>Cliente</label>
+          <select name="cliente" defaultValue={searchParams.cliente || ''}>
+            <option value="">Todos</option>
+            {(clients || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ minWidth: 180 }}>
+          <label>Estado de pago</label>
+          <select name="estado" defaultValue={searchParams.estado || ''}>
+            <option value="">Todos</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="parcial">Parcial</option>
+            <option value="pagado">Pagado</option>
+          </select>
+        </div>
+        <button type="submit" className="btn small">Filtrar</button>
+        {hayFiltro && (
+          <Link href="/admin/pedidos" className="text-sm font-mono text-crate underline mb-1">limpiar</Link>
+        )}
+      </form>
+
+      {filtrados.length === 0 && (
+        <p className="text-inksoft text-sm">
+          {hayFiltro ? 'No hay pedidos para el filtro seleccionado.' : 'Aún no hay pedidos.'}
+        </p>
+      )}
+
       <div className="divide-y divide-line">
-        {orders?.map((o: any) => {
-          const paid = (o.payments || []).reduce((s: number, p: any) => s + Number(p.monto), 0)
-          return (
-            <Link key={o.id} href={`/admin/pedidos/${o.id}`} className="flex justify-between items-center py-4 flex-wrap gap-3 hover:bg-crate/5">
-              <div>
-                <div className="font-mono text-xs text-inksoft">{o.folio} · {fmtDate(o.created_at)}</div>
-                <div className="font-semibold">{o.profiles?.name}</div>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className={`stamp ${statusClass(o.status)}`}>{o.status}</span>
-                <span className={`stamp ${paymentStatus(o.total, paid)}`}>{paymentStatus(o.total, paid)}</span>
-                <span className="font-mono font-semibold">{fmtMoney(o.total)}</span>
-              </div>
-            </Link>
-          )
-        })}
+        {filtrados.map((o: any) => (
+          <Link key={o.id} href={`/admin/pedidos/${o.id}`} className="flex justify-between items-center py-4 flex-wrap gap-3 hover:bg-crate/5">
+            <div>
+              <div className="font-mono text-xs text-inksoft">{o.folio} · {fmtDate(o.created_at)}</div>
+              <div className="font-semibold">{o.profiles?.name}</div>
+            </div>
+            <div className="flex items-center gap-3">
+              {o.saldo > 0 && (
+                <span className="font-mono text-xs" style={{ color: '#C2492A' }}>debe {fmtMoney(o.saldo)}</span>
+              )}
+              <span className={`stamp ${statusClass(o.status)}`}>{o.status}</span>
+              <span className={`stamp ${o.estadoPago}`}>{o.estadoPago}</span>
+              <span className="font-mono font-semibold">{fmtMoney(o.total)}</span>
+            </div>
+          </Link>
+        ))}
       </div>
     </div>
   )
