@@ -34,6 +34,7 @@ export default async function PortalLayout({ children }: { children: React.React
       <div className="flex gap-1 mb-5 border-b border-line font-subtitle text-xs uppercase tracking-wide">
         <Link href="/portal" className="px-4 py-2">Pedidos</Link>
         <Link href="/portal/facturas" className="px-4 py-2">Facturas</Link>
+        <Link href="/portal/catalogo" className="px-4 py-2">Catálogo</Link>
       </div>
       {children}
     </div>
