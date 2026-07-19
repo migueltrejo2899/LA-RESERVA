@@ -27,6 +27,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         </div>
       </div>
       <div className="flex gap-1 mb-5 border-b border-line font-subtitle text-xs uppercase tracking-wide">
+        <Link href="/admin" className="px-4 py-2">Resumen</Link>
         <Link href="/admin/pedidos" className="px-4 py-2">Pedidos</Link>
         <Link href="/admin/clientes" className="px-4 py-2">Clientes</Link>
         <Link href="/admin/facturas" className="px-4 py-2">Facturas</Link>
