@@ -7,18 +7,16 @@ import { generarPedidoDesdeFactura, reLigarComplemento } from './actions'
 export default async function FacturasAdminPage({
   searchParams,
 }: {
-  searchParams: { mes?: string; cliente?: string; tipo?: string; error?: string }
+  searchParams: { mes?: string; cliente?: string; tipo?: string; error?: string; ok?: string }
 }) {
   const supabase = createClient()
 
-  // Traer todos los clientes para el selector de filtro
   const { data: clients } = await supabase
     .from('profiles')
     .select('id, name, rfc')
     .eq('role', 'client')
     .order('name')
 
-  // Query de facturas con filtros opcionales
   let query = supabase
     .from('invoices')
     .select('*, profiles!invoices_client_id_fkey(name, rfc)')
@@ -27,11 +25,9 @@ export default async function FacturasAdminPage({
   if (searchParams.cliente) {
     query = query.eq('client_id', searchParams.cliente)
   }
-
   if (searchParams.tipo && ['factura', 'complemento_pago'].includes(searchParams.tipo)) {
     query = query.eq('tipo', searchParams.tipo)
   }
-
   if (searchParams.mes) {
     const [y, m] = searchParams.mes.split('-')
     const start = `${y}-${m}-01`
@@ -42,69 +38,55 @@ export default async function FacturasAdminPage({
 
   const { data: invoices } = await query
 
-  // Generar URLs firmadas para descarga
   const withUrls = await Promise.all(
     (invoices || []).map(async (inv: any) => {
       let pdfUrl: string | undefined
       let xmlUrl: string | undefined
-
       if (inv.file_path) {
-        const { data: signed } = await supabase.storage
-          .from('facturas')
-          .createSignedUrl(inv.file_path, 3600)
+        const { data: signed } = await supabase.storage.from('facturas').createSignedUrl(inv.file_path, 3600)
         pdfUrl = signed?.signedUrl
       }
-
       if (inv.xml_path && inv.xml_path !== inv.file_path) {
-        const { data: signedXml } = await supabase.storage
-          .from('facturas')
-          .createSignedUrl(inv.xml_path, 3600)
+        const { data: signedXml } = await supabase.storage.from('facturas').createSignedUrl(inv.xml_path, 3600)
         xmlUrl = signedXml?.signedUrl
       }
-
       return { ...inv, pdfUrl, xmlUrl }
     })
   )
 
-  // Estadísticas rápidas
   const totalFacturas = withUrls.filter((i) => i.tipo === 'factura').length
   const totalComplementos = withUrls.filter((i) => i.tipo === 'complemento_pago').length
   const montoTotal = withUrls.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
 
+  const facturas = withUrls.filter((i) => i.tipo === 'factura')
+  const sueltos = withUrls.filter(
+    (i) => i.tipo === 'complemento_pago' && !facturas.some((f) => f.id === i.factura_id)
+  )
+
   return (
-    <div>
-      {/* Encabezado */}
-      <div style={{ marginBottom: 24 }}>
-        <h2
-          className="font-display"
-          style={{ fontSize: 22, marginBottom: 4, fontFamily: 'var(--font-display)' }}
-        >
-          Gestión de facturas
-        </h2>
+    <div className="space-y-5">
+      <div>
+        <h2 className="font-display text-2xl mb-1">Gestión de facturas</h2>
         <p className="text-sm" style={{ color: '#5B5C60' }}>
-          Sube pares de XML + PDF. El sistema los empareja automáticamente por nombre, los asigna al
-          cliente por RFC, y crea el pedido con sus artículos leyendo el XML.
+          Sube pares de XML + PDF. El sistema los empareja automáticamente por nombre, asigna al cliente por
+          RFC, crea el pedido leyendo el XML, y liga cada complemento con su factura y su pedido.
         </p>
       </div>
 
       {searchParams.error && (
-        <div className="card" style={{ marginBottom: 16, borderColor: '#C2492A' }}>
+        <div className="card" style={{ borderColor: '#C2492A' }}>
           <p className="text-sm" style={{ color: '#C2492A' }}>{searchParams.error}</p>
         </div>
       )}
+      {searchParams.ok && (
+        <div className="card" style={{ borderColor: '#676F36' }}>
+          <p className="text-sm" style={{ color: '#676F36' }}>{searchParams.ok}</p>
+        </div>
+      )}
 
-      {/* Formulario de subida */}
       <UploadForm />
 
-      {/* Estadísticas */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
         <div className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#676F36', fontFamily: 'var(--font-display)' }}>
             {totalFacturas}
@@ -131,8 +113,7 @@ export default async function FacturasAdminPage({
         </div>
       </div>
 
-      {/* Filtros */}
-      <div className="card" style={{ marginBottom: 24 }}>
+      <div className="card">
         <form className="field" method="get" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
           <div style={{ minWidth: 160 }}>
             <label>Mes</label>
@@ -143,9 +124,7 @@ export default async function FacturasAdminPage({
             <select name="cliente" defaultValue={searchParams.cliente || ''}>
               <option value="">Todos</option>
               {(clients || []).map((c: any) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} {c.rfc ? `(${c.rfc})` : ''}
-                </option>
+                <option key={c.id} value={c.id}>{c.name} {c.rfc ? `(${c.rfc})` : ''}</option>
               ))}
             </select>
           </div>
@@ -159,170 +138,128 @@ export default async function FacturasAdminPage({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="submit" className="btn small">Filtrar</button>
-            <a href="/admin/facturas" className="btn ghost small" style={{ textDecoration: 'none' }}>
-              Limpiar
-            </a>
+            <a href="/admin/facturas" className="btn ghost small" style={{ textDecoration: 'none' }}>Limpiar</a>
           </div>
         </form>
       </div>
 
-      {/* Tabla de facturas */}
       <div className="card">
-        <h3
-          className="font-display"
-          style={{ fontSize: 16, marginBottom: 16, fontFamily: 'var(--font-display)' }}
-        >
+        <h3 className="font-display" style={{ fontSize: 16, marginBottom: 16 }}>
           Facturas registradas ({withUrls.length})
         </h3>
 
-        {withUrls.length === 0 ? (
-          <p className="text-sm" style={{ color: '#5B5C60' }}>
-            No se encontraron facturas para los filtros seleccionados.
-          </p>
+        {facturas.length === 0 && sueltos.length === 0 ? (
+          <p className="text-sm" style={{ color: '#5B5C60' }}>No se encontraron facturas para los filtros seleccionados.</p>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '2px solid #CBBFA4' }}>
-                  <th style={{ padding: '10px 8px', fontFamily: 'var(--font-subtitle)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
-                    Fecha
-                  </th>
-                  <th style={{ padding: '10px 8px', fontFamily: 'var(--font-subtitle)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
-                    Cliente
-                  </th>
-                  <th style={{ padding: '10px 8px', fontFamily: 'var(--font-subtitle)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
-                    Tipo
-                  </th>
-                  <th style={{ padding: '10px 8px', fontFamily: 'var(--font-subtitle)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
-                    Monto
-                  </th>
-                  <th style={{ padding: '10px 8px', fontFamily: 'var(--font-subtitle)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
-                    Pedido
-                  </th>
-                  <th style={{ padding: '10px 8px', fontFamily: 'var(--font-subtitle)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
-                    Archivos
-                  </th>
-                  <th style={{ padding: '10px 8px' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {withUrls.map((inv: any) => (
-                  <tr key={inv.id} style={{ borderBottom: '1px solid #CBBFA4' }}>
-                    <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>
-                      {fmtDate(inv.fecha)}
-                    </td>
-                    <td style={{ padding: '10px 8px' }}>
-                      <div style={{ fontWeight: 500 }}>{inv.profiles?.name || '—'}</div>
-                      {inv.profiles?.rfc && (
-                        <div style={{ fontSize: 11, color: '#5B5C60' }}>{inv.profiles.rfc}</div>
-                      )}
-                    </td>
-                    <td style={{ padding: '10px 8px' }}>
-                      <span
-                        className="stamp"
-                        style={{
-                          fontSize: 10,
-                          padding: '4px 8px',
-                          transform: 'none',
-                          color: inv.tipo === 'factura' ? '#676F36' : '#A57F9B',
-                        }}
-                      >
-                        {inv.tipo === 'factura' ? 'Factura' : 'Complemento'}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {facturas.map((f: any) => {
+              const complementos = withUrls.filter((i: any) => i.tipo === 'complemento_pago' && i.factura_id === f.id)
+              return (
+                <div key={f.id} style={{ border: '1px solid #CBBFA4', borderRadius: 6, padding: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                    <div>
+                      <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#676F36' }}>
+                        Factura
                       </span>
-                    </td>
-                    <td style={{ padding: '10px 8px', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                      {inv.monto ? fmtMoney(inv.monto) : '—'}
-                    </td>
-                    <td style={{ padding: '10px 8px' }}>
-                      {inv.order_id ? (
-                        <a href={`/admin/pedidos/${inv.order_id}`} style={{ fontSize: 12, fontWeight: 600, color: '#676F36', textDecoration: 'underline' }}>
+                      <div style={{ fontWeight: 500, marginTop: 6 }}>{f.profiles?.name || '—'}</div>
+                      <div style={{ fontSize: 12, color: '#5B5C60' }}>
+                        {fmtDate(f.fecha)}{f.monto ? ` · ${fmtMoney(f.monto)}` : ''}{f.profiles?.rfc ? ` · RFC ${f.profiles.rfc}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      {f.order_id ? (
+                        <a href={`/admin/pedidos/${f.order_id}`} style={{ fontSize: 12, fontWeight: 600, color: '#676F36', textDecoration: 'underline' }}>
                           Ver pedido
                         </a>
-                      ) : inv.tipo === 'factura' ? (
+                      ) : (
                         <form action={generarPedidoDesdeFactura}>
-                          <input type="hidden" name="invoiceId" value={inv.id} />
+                          <input type="hidden" name="invoiceId" value={f.id} />
                           <button
                             type="submit"
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: '#C2492A',
-                              border: '1px solid #C2492A',
-                              borderRadius: 3,
-                              padding: '3px 8px',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                            }}
+                            style={{ fontSize: 11, fontWeight: 600, color: '#C2492A', border: '1px solid #C2492A', borderRadius: 3, padding: '3px 8px', background: 'transparent', cursor: 'pointer' }}
                           >
                             Generar pedido
                           </button>
                         </form>
-                      ) : (
-                        <form action={reLigarComplemento}>
-                          <input type="hidden" name="invoiceId" value={inv.id} />
-                          <button
-                            type="submit"
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: '#A57F9B',
-                              border: '1px solid #A57F9B',
-                              borderRadius: 3,
-                              padding: '3px 8px',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            Ligar a pedido
-                          </button>
-                        </form>
                       )}
-                    </td>
-                    <td style={{ padding: '10px 8px' }}>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        {inv.pdfUrl && (
-                          <a
-                            href={inv.pdfUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 600,
-                              color: '#C2492A',
-                              textDecoration: 'underline',
-                            }}
-                          >
-                            PDF
-                          </a>
-                        )}
-                        {inv.xmlUrl && (
-                         <a 
-                            href={inv.xmlUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 600,
-                              color: '#626F77',
-                              textDecoration: 'underline',
-                            }}
-                          >
-                            XML
-                          </a>
-                        )}
+                      {f.pdfUrl && (
+                        <a href={f.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>
+                      )}
+                      {f.xmlUrl && (
+                        <a href={f.xmlUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>
+                      )}
+                      <DeleteButton invoiceId={f.id} filePath={f.file_path} xmlPath={f.xml_path} />
+                    </div>
+                  </div>
+
+                  {complementos.length > 0 && (
+                    <div style={{ marginTop: 12, paddingLeft: 14, borderLeft: '2px solid #CBBFA4', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60' }}>
+                        Complementos de pago
                       </div>
-                    </td>
-                    <td style={{ padding: '10px 8px' }}>
-                      <DeleteButton
-                        invoiceId={inv.id}
-                        filePath={inv.file_path}
-                        xmlPath={inv.xml_path}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      {complementos.map((c: any) => (
+                        <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                          <div>
+                            <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#A57F9B' }}>
+                              Complemento
+                            </span>
+                            <div style={{ fontSize: 12, color: '#5B5C60', marginTop: 4 }}>
+                              {fmtDate(c.fecha)}{c.monto ? ` · ${fmtMoney(c.monto)}` : ''}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            {c.pdfUrl && <a href={c.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>}
+                            {c.xmlUrl && <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>}
+                            <DeleteButton invoiceId={c.id} filePath={c.file_path} xmlPath={c.xml_path} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
+            {sueltos.length > 0 && (
+              <div style={{ border: '1px solid #CBBFA4', borderRadius: 6, padding: 14 }}>
+                <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60', marginBottom: 10 }}>
+                  Complementos sin factura asociada
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {sueltos.map((c: any) => (
+                    <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                      <div>
+                        <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#A57F9B' }}>
+                          Complemento
+                        </span>
+                        <div style={{ fontWeight: 500, marginTop: 6 }}>{c.profiles?.name || '—'}</div>
+                        <div style={{ fontSize: 12, color: '#5B5C60' }}>
+                          {fmtDate(c.fecha)}{c.monto ? ` · ${fmtMoney(c.monto)}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        {c.order_id ? (
+                          <a href={`/admin/pedidos/${c.order_id}`} style={{ fontSize: 12, fontWeight: 600, color: '#676F36', textDecoration: 'underline' }}>Ver pedido</a>
+                        ) : (
+                          <form action={reLigarComplemento}>
+                            <input type="hidden" name="invoiceId" value={c.id} />
+                            <button
+                              type="submit"
+                              style={{ fontSize: 11, fontWeight: 600, color: '#A57F9B', border: '1px solid #A57F9B', borderRadius: 3, padding: '3px 8px', background: 'transparent', cursor: 'pointer' }}
+                            >
+                              Ligar a pedido
+                            </button>
+                          </form>
+                        )}
+                        {c.pdfUrl && <a href={c.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>}
+                        {c.xmlUrl && <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>}
+                        <DeleteButton invoiceId={c.id} filePath={c.file_path} xmlPath={c.xml_path} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
