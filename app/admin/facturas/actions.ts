@@ -31,6 +31,14 @@ function inspeccionarXML(xmlText: string) {
   return { esComplemento: tipoComprobante === 'P', rfcReceptor }
 }
 
+// Quita sufijos tipo " (1)", "(2)", etc. que el sistema operativo o el
+// navegador agregan automáticamente cuando hay dos archivos con el mismo
+// nombre, para que el XML y el PDF de una misma factura se sigan
+// reconociendo como par aunque uno de los dos tenga ese sufijo.
+function normalizarBase(nombre: string) {
+  return nombre.replace(/\s*\(\d+\)\s*$/, '').trim()
+}
+
 async function crearPedidoDesdeConceptos(
   supabase: ReturnType<typeof createClient>,
   clientId: string,
@@ -94,11 +102,13 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
     return [{ fileName: '(sin archivos)', status: 'error', message: 'No se seleccionó ningún archivo.' }]
   }
 
-  // agrupar por nombre base (sin extensión) para emparejar XML con su PDF
+  // agrupar por nombre base (sin extensión, sin sufijo "(N)") para emparejar
+  // XML con su PDF aunque uno de los dos traiga ese sufijo
   const grupos = new Map<string, { xml?: File; pdf?: File }>()
   for (const f of validos) {
     const dot = f.name.lastIndexOf('.')
-    const base = dot > -1 ? f.name.slice(0, dot) : f.name
+    const baseCruda = dot > -1 ? f.name.slice(0, dot) : f.name
+    const base = normalizarBase(baseCruda)
     const ext = dot > -1 ? f.name.slice(dot + 1).toLowerCase() : ''
     const grupo = grupos.get(base) || {}
     if (ext === 'xml') grupo.xml = f
@@ -390,4 +400,40 @@ export async function reLigarComplemento(formData: FormData) {
   revalidatePath('/admin/facturas')
   revalidatePath('/admin/pedidos')
   redirect(facturaMatch!.order_id ? `/admin/pedidos/${facturaMatch!.order_id}` : '/admin/facturas')
+}
+
+// Recorre todas las facturas que ya tienen un pedido ligado y, si la fecha
+// de creación del pedido no coincide con la fecha de la factura, la corrige.
+// Sirve para arreglar en bloque pedidos viejos que se crearon con la fecha
+// de subida en vez de la fecha real de la factura.
+export async function corregirFechasPedidos() {
+  const supabase = createClient()
+
+  const { data: facturas } = await supabase
+    .from('invoices')
+    .select('order_id, fecha')
+    .eq('tipo', 'factura')
+    .not('order_id', 'is', null)
+
+  let corregidos = 0
+
+  for (const f of facturas || []) {
+    const { data: order } = await supabase
+      .from('orders')
+      .select('id, created_at')
+      .eq('id', f.order_id as string)
+      .single()
+
+    if (!order) continue
+
+    const fechaActual = new Date(order.created_at).toISOString().slice(0, 10)
+    if (fechaActual !== f.fecha) {
+      await supabase.from('orders').update({ created_at: f.fecha }).eq('id', order.id)
+      corregidos++
+    }
+  }
+
+  revalidatePath('/admin/facturas')
+  revalidatePath('/admin/pedidos')
+  redirect('/admin/facturas?ok=' + encodeURIComponent(`Se corrigieron ${corregidos} pedido(s) con la fecha de su factura.`))
 }
