@@ -33,6 +33,9 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
     <div className="space-y-5">
       <div className="flex justify-between items-center flex-wrap gap-2">
         <Link href="/admin/pedidos" className="text-crate underline text-sm font-mono">← Volver a pedidos</Link>
+        <div className="flex items-center gap-3">
+          <Link href={`/admin/pedidos/${order.id}/picking`} className="btn ghost small">Picking list</Link>
+        </div>
         <form action={deleteOrder}>
           <input type="hidden" name="orderId" value={order.id} />
           <details className="inline-block">
