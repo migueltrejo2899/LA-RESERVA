@@ -19,6 +19,9 @@ const parserOptions = {
   removeNSPrefix: true,
 }
 
+// Revisa el XML sin asumir su tipo: dice si es un complemento de pago
+// (TipoDeComprobante "P") y de qué RFC es el receptor, para poder
+// decidir cómo procesarlo y a qué cliente asignarlo.
 function inspeccionarXML(xmlText: string) {
   const parser = new XMLParser(parserOptions)
   const data = parser.parse(xmlText)
@@ -57,6 +60,9 @@ async function crearPedidoDesdeConceptos(
   return order.id
 }
 
+// Registra en la tabla de pagos el monto que trae el complemento de pago,
+// para que el saldo del pedido se actualice solo, sin que el admin tenga
+// que capturarlo a mano.
 async function registrarPagoDeComplemento(
   supabase: ReturnType<typeof createClient>,
   orderId: string,
@@ -74,6 +80,11 @@ async function registrarPagoDeComplemento(
   })
 }
 
+// Sube uno o varios pares de archivos (XML + PDF con el mismo nombre base).
+// Cada factura se asigna al cliente cuyo RFC coincida con el receptor del XML,
+// y además se crea automáticamente su pedido con los artículos leídos del XML.
+// Cada complemento de pago se liga automáticamente a la factura que paga y
+// registra su pago en el pedido, con el monto que trae el XML.
 export async function bulkUploadInvoices(formData: FormData): Promise<UploadResult[]> {
   const supabase = createClient()
   const files = formData.getAll('files') as File[]
@@ -83,6 +94,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
     return [{ fileName: '(sin archivos)', status: 'error', message: 'No se seleccionó ningún archivo.' }]
   }
 
+  // agrupar por nombre base (sin extensión) para emparejar XML con su PDF
   const grupos = new Map<string, { xml?: File; pdf?: File }>()
   for (const f of validos) {
     const dot = f.name.lastIndexOf('.')
@@ -144,6 +156,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
             .eq('folio_fiscal', relacion.idDocumentoRelacionado)
             .maybeSingle()
           facturaIdRelacionada = facturaRelacionada?.id || null
+          // el complemento hereda el pedido de la factura que paga
           orderId = facturaRelacionada?.order_id || null
         }
       } else {
@@ -153,6 +166,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
         monto = factura.total
         folioFiscal = factura.uuid
 
+        // crea automáticamente el pedido de esta factura, con sus artículos
         orderId = await crearPedidoDesdeConceptos(
           supabase,
           clienteMatch.id,
@@ -210,6 +224,8 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
         factura_id: facturaIdRelacionada,
       })
 
+      // si es un complemento de pago y quedó ligado a un pedido, registramos
+      // el pago automáticamente con el monto que trae el XML
       if (tipo === 'complemento_pago' && orderId && monto) {
         await registrarPagoDeComplemento(supabase, orderId, monto, fecha, folioFiscal)
       }
@@ -241,6 +257,9 @@ export async function deleteInvoice(formData: FormData) {
   revalidatePath('/admin/facturas')
 }
 
+// Para facturas que ya estaban registradas ANTES de que existiera esta
+// función (subidas sin generar su pedido): lee su XML ya guardado en el
+// storage y crea el pedido retroactivamente.
 export async function generarPedidoDesdeFactura(formData: FormData) {
   const supabase = createClient()
   const invoiceId = String(formData.get('invoiceId') || '')
@@ -297,6 +316,11 @@ export async function generarPedidoDesdeFactura(formData: FormData) {
   redirect(`/admin/pedidos/${orderId}`)
 }
 
+// Para complementos de pago ya registrados que se quedaron sin pedido
+// (por ejemplo, subidos antes de esta corrección): busca su factura
+// relacionada (por factura_id, o re-leyendo el XML guardado si hace falta)
+// y copia el pedido de esa factura al complemento. También registra el
+// pago si todavía no existía uno para este complemento.
 export async function reLigarComplemento(formData: FormData) {
   const supabase = createClient()
   const invoiceId = String(formData.get('invoiceId') || '')
@@ -348,6 +372,8 @@ export async function reLigarComplemento(formData: FormData) {
     .update({ factura_id: facturaMatch!.id, order_id: facturaMatch!.order_id })
     .eq('id', invoiceId)
 
+  // si el complemento ya quedó ligado a un pedido y todavía no se le había
+  // registrado su pago, lo registramos ahora con el monto guardado
   if (facturaMatch!.order_id && inv!.monto) {
     const { data: pagoExistente } = await supabase
       .from('payments')
