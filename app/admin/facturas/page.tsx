@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtDate, fmtMoney } from '@/lib/utils'
 import UploadForm from './UploadForm'
 import DeleteButton from './DeleteButton'
-import { generarPedidoDesdeFactura, reLigarComplemento } from './actions'
+import { generarPedidoDesdeFactura, reLigarComplemento, corregirFechasPedidos } from './actions'
 
 export default async function FacturasAdminPage({
   searchParams,
@@ -65,12 +65,17 @@ export default async function FacturasAdminPage({
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="font-display text-2xl mb-1">Gestión de facturas</h2>
-        <p className="text-sm" style={{ color: '#5B5C60' }}>
-          Sube pares de XML + PDF. El sistema los empareja automáticamente por nombre, asigna al cliente por
-          RFC, crea el pedido leyendo el XML, y liga cada complemento con su factura y su pedido.
-        </p>
+      <div className="flex justify-between items-start flex-wrap gap-3">
+        <div>
+          <h2 className="font-display text-2xl mb-1">Gestión de facturas</h2>
+          <p className="text-sm" style={{ color: '#5B5C60' }}>
+            Sube pares de XML + PDF. El sistema los empareja automáticamente por nombre, asigna al cliente por
+            RFC, crea el pedido leyendo el XML, y liga cada complemento con su factura y su pedido.
+          </p>
+        </div>
+        <form action={corregirFechasPedidos}>
+          <button type="submit" className="btn ghost small">Corregir fechas de pedidos con factura</button>
+        </form>
       </div>
 
       {searchParams.error && (
