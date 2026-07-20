@@ -19,7 +19,7 @@ export default async function PortalLayout({ children }: { children: React.React
 
   return (
     <div className="max-w-3xl mx-auto px-5 py-7">
-      <div className="flex justify-between items-end border-b-[3px] border-ink pb-4 mb-7 flex-wrap gap-3">
+      <div className="no-print flex justify-between items-end border-b-[3px] border-ink pb-4 mb-7 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="brand-mark w-10 h-10 rounded text-base" style={{ transform: 'rotate(-3deg)' }}>R</div>
           <div>
@@ -31,10 +31,11 @@ export default async function PortalLayout({ children }: { children: React.React
           <form action={signOut}><button className="text-stamp underline">salir</button></form>
         </div>
       </div>
-      <div className="flex gap-1 mb-5 border-b border-line font-subtitle text-xs uppercase tracking-wide">
+      <div className="no-print flex gap-1 mb-5 border-b border-line font-subtitle text-xs uppercase tracking-wide">
         <Link href="/portal" className="px-4 py-2">Pedidos</Link>
         <Link href="/portal/facturas" className="px-4 py-2">Facturas</Link>
         <Link href="/portal/catalogo" className="px-4 py-2">Catálogo</Link>
+        <Link href="/portal/estado-cuenta" className="px-4 py-2">Estado de cuenta</Link>
       </div>
       {children}
     </div>
