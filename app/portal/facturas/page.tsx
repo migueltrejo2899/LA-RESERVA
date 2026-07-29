@@ -18,48 +18,68 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
     query = query.gte('fecha', start).lte('fecha', end)
   }
 
-  const { data: invoices } = await query
+  // las dos consultas corren en paralelo
+  const [{ data: profile }, { data: invoices }] = await Promise.all([
+    supabase.from('profiles').select('dias_credito').eq('id', user!.id).single(),
+    query,
+  ])
 
-  // generar URLs firmadas (válidas 1 hora) para cada archivo (PDF y XML si existe)
-  const withUrls = await Promise.all(
-    (invoices || []).map(async (inv) => {
-      const { data: signed } = await supabase.storage.from('facturas').createSignedUrl(inv.file_path, 3600)
-      let xmlUrl: string | undefined
-      if (inv.xml_path) {
-        const { data: signedXml } = await supabase.storage.from('facturas').createSignedUrl(inv.xml_path, 3600)
-        xmlUrl = signedXml?.signedUrl
-      }
-      return { ...inv, url: signed?.signedUrl, xmlUrl }
-    })
-  )
+  const lista = invoices || []
+  const diasCredito = profile?.dias_credito ?? 30
 
-  const facturas = withUrls.filter((i) => i.tipo === 'factura')
-  const sinFactura = withUrls.filter(
+  const facturas = lista.filter((i) => i.tipo === 'factura')
+  const sinFactura = lista.filter(
     (i) => i.tipo === 'complemento_pago' && !facturas.some((f) => f.id === i.factura_id)
   )
 
   // una factura se considera pendiente de pago cuando no tiene ningún
-  // complemento de pago ligado a ella
-  const facturasPendientes = facturas.filter(
-    (f) => !withUrls.some((i) => i.tipo === 'complemento_pago' && i.factura_id === f.id)
-  )
+  // complemento de pago ligado a ella; y vencida cuando además ya pasaron
+  // los días de crédito desde su fecha
+  const hoy = new Date()
+  function sinComplemento(f: any) {
+    return !lista.some((i) => i.tipo === 'complemento_pago' && i.factura_id === f.id)
+  }
+  function estaVencida(f: any) {
+    if (!sinComplemento(f)) return false
+    const limite = new Date(f.fecha)
+    limite.setDate(limite.getDate() + diasCredito)
+    return hoy > limite
+  }
+
+  const facturasPendientes = facturas.filter(sinComplemento)
   const totalAdeudado = facturasPendientes.reduce((s, f) => s + Number(f.monto || 0), 0)
+  const facturasVencidas = facturas.filter(estaVencida)
+  const totalVencido = facturasVencidas.reduce((s, f) => s + Number(f.monto || 0), 0)
+
+  const dl = (path: string) => `/descargar?path=${encodeURIComponent(path)}`
 
   return (
     <div className="space-y-5">
       {facturas.length > 0 && (
-        <div className="card" style={{ borderColor: facturasPendientes.length > 0 ? '#C2492A' : undefined }}>
+        <div className="card" style={{ borderColor: facturasVencidas.length > 0 ? '#C2492A' : undefined }}>
           <h3 className="font-display text-lg mb-2">Facturas pendientes de pago</h3>
           {facturasPendientes.length === 0 ? (
             <p className="text-sm text-inksoft">Todas tus facturas ya tienen su complemento de pago registrado.</p>
           ) : (
-            <div className="flex justify-between items-center flex-wrap gap-2">
-              <p className="text-sm text-inksoft">
-                {facturasPendientes.length} factura{facturasPendientes.length === 1 ? '' : 's'} sin complemento de pago
-              </p>
-              <div className="font-mono font-bold text-lg" style={{ color: '#C2492A' }}>
-                {fmtMoney(totalAdeudado)}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center flex-wrap gap-2">
+                <p className="text-sm text-inksoft">
+                  {facturasPendientes.length} factura{facturasPendientes.length === 1 ? '' : 's'} sin complemento de pago
+                </p>
+                <div className="font-mono font-bold text-lg" style={{ color: '#C2492A' }}>
+                  {fmtMoney(totalAdeudado)}
+                </div>
               </div>
+              {facturasVencidas.length > 0 && (
+                <div className="flex justify-between items-center flex-wrap gap-2 pt-2" style={{ borderTop: '1px solid #CBBFA4' }}>
+                  <p className="text-sm font-semibold" style={{ color: '#C2492A' }}>
+                    {facturasVencidas.length} ya vencida{facturasVencidas.length === 1 ? '' : 's'} (más de {diasCredito} días)
+                  </p>
+                  <div className="font-mono font-bold" style={{ color: '#C2492A' }}>
+                    {fmtMoney(totalVencido)}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -87,20 +107,25 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
 
         <div className="space-y-4">
           {facturas.map((f) => {
-            const complementos = withUrls.filter(
+            const complementos = lista.filter(
               (i) => i.tipo === 'complemento_pago' && i.factura_id === f.id
             )
             const pendiente = complementos.length === 0
+            const vencida = estaVencida(f)
             return (
-              <div key={f.id} className="border border-line rounded p-3">
+              <div key={f.id} className="border rounded p-3" style={{ borderColor: vencida ? '#C2492A' : '#CBBFA4' }}>
                 <div className="flex justify-between items-center flex-wrap gap-2">
                   <div>
                     <span className="stamp entregado">Factura</span>
-                    {pendiente && (
+                    {vencida ? (
+                      <span className="stamp" style={{ marginLeft: 6, color: '#C2492A', borderColor: '#C2492A' }}>
+                        Vencida
+                      </span>
+                    ) : pendiente ? (
                       <span className="stamp" style={{ marginLeft: 6, color: '#C2492A', borderColor: '#C2492A' }}>
                         Pendiente de pago
                       </span>
-                    )}
+                    ) : null}
                     <div className="text-sm mt-1">
                       {f.file_name} · {fmtDate(f.fecha)}{f.monto ? ` · ${fmtMoney(f.monto)}` : ''}
                     </div>
@@ -111,9 +136,9 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
                     )}
                   </div>
                   <div className="flex gap-2">
-                    {f.url && <a href={f.url} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
-                    {f.xmlUrl && f.xml_path !== f.file_path && (
-                      <a href={f.xmlUrl} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
+                    {f.file_path && <a href={dl(f.file_path)} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
+                    {f.xml_path && f.xml_path !== f.file_path && (
+                      <a href={dl(f.xml_path)} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
                     )}
                   </div>
                 </div>
@@ -130,9 +155,9 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
                           </div>
                         </div>
                         <div className="flex gap-2">
-                          {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
-                          {c.xmlUrl && c.xml_path !== c.file_path && (
-                            <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
+                          {c.file_path && <a href={dl(c.file_path)} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
+                          {c.xml_path && c.xml_path !== c.file_path && (
+                            <a href={dl(c.xml_path)} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
                           )}
                         </div>
                       </div>
@@ -155,9 +180,9 @@ export default async function FacturasPage({ searchParams }: { searchParams: { m
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
-                    {c.xmlUrl && c.xml_path !== c.file_path && (
-                      <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
+                    {c.file_path && <a href={dl(c.file_path)} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
+                    {c.xml_path && c.xml_path !== c.file_path && (
+                      <a href={dl(c.xml_path)} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
                     )}
                   </div>
                 </div>
