@@ -11,15 +11,9 @@ export default async function FacturasAdminPage({
 }) {
   const supabase = createClient()
 
-  const { data: clients } = await supabase
-    .from('profiles')
-    .select('id, name, rfc')
-    .eq('role', 'client')
-    .order('name')
-
   let query = supabase
     .from('invoices')
-    .select('*, profiles!invoices_client_id_fkey(name, rfc)')
+    .select('*, profiles!invoices_client_id_fkey(name, rfc, dias_credito)')
     .order('fecha', { ascending: false })
 
   if (searchParams.cliente) {
@@ -36,32 +30,38 @@ export default async function FacturasAdminPage({
     query = query.gte('fecha', start).lte('fecha', end)
   }
 
-  const { data: invoices } = await query
+  // las tres consultas corren en paralelo (más rápido que una por una)
+  const [{ data: clients }, { data: invoices }, { data: todosComplementos }] = await Promise.all([
+    supabase.from('profiles').select('id, name, rfc').eq('role', 'client').order('name'),
+    query,
+    supabase.from('invoices').select('factura_id').eq('tipo', 'complemento_pago'),
+  ])
 
-  const withUrls = await Promise.all(
-    (invoices || []).map(async (inv: any) => {
-      let pdfUrl: string | undefined
-      let xmlUrl: string | undefined
-      if (inv.file_path) {
-        const { data: signed } = await supabase.storage.from('facturas').createSignedUrl(inv.file_path, 3600)
-        pdfUrl = signed?.signedUrl
-      }
-      if (inv.xml_path && inv.xml_path !== inv.file_path) {
-        const { data: signedXml } = await supabase.storage.from('facturas').createSignedUrl(inv.xml_path, 3600)
-        xmlUrl = signedXml?.signedUrl
-      }
-      return { ...inv, pdfUrl, xmlUrl }
-    })
+  const lista = invoices || []
+
+  const facturasPagadas = new Set((todosComplementos || []).map((c: any) => c.factura_id).filter(Boolean))
+
+  const hoy = new Date()
+  function estaVencida(f: any) {
+    if (f.tipo !== 'factura' || facturasPagadas.has(f.id)) return false
+    const limite = new Date(f.fecha)
+    limite.setDate(limite.getDate() + (f.profiles?.dias_credito ?? 30))
+    return hoy > limite
+  }
+
+  const totalFacturas = lista.filter((i: any) => i.tipo === 'factura').length
+  const totalComplementos = lista.filter((i: any) => i.tipo === 'complemento_pago').length
+  const montoTotal = lista.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
+
+  const facturas = lista.filter((i: any) => i.tipo === 'factura')
+  const sueltos = lista.filter(
+    (i: any) => i.tipo === 'complemento_pago' && !facturas.some((f: any) => f.id === i.factura_id)
   )
 
-  const totalFacturas = withUrls.filter((i) => i.tipo === 'factura').length
-  const totalComplementos = withUrls.filter((i) => i.tipo === 'complemento_pago').length
-  const montoTotal = withUrls.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
+  const vencidas = facturas.filter(estaVencida)
+  const montoVencido = vencidas.reduce((s: number, f: any) => s + Number(f.monto || 0), 0)
 
-  const facturas = withUrls.filter((i) => i.tipo === 'factura')
-  const sueltos = withUrls.filter(
-    (i) => i.tipo === 'complemento_pago' && !facturas.some((f) => f.id === i.factura_id)
-  )
+  const dl = (path: string) => `/descargar?path=${encodeURIComponent(path)}`
 
   return (
     <div className="space-y-5">
@@ -91,7 +91,7 @@ export default async function FacturasAdminPage({
 
       <UploadForm />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         <div className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#676F36', fontFamily: 'var(--font-display)' }}>
             {totalFacturas}
@@ -104,17 +104,19 @@ export default async function FacturasAdminPage({
           </div>
           <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Complementos</div>
         </div>
+        <div className="card" style={{ textAlign: 'center', padding: '16px 12px', borderColor: vencidas.length > 0 ? '#C2492A' : undefined }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#C2492A', fontFamily: 'var(--font-display)' }}>
+            {vencidas.length}
+          </div>
+          <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>
+            Vencidas{vencidas.length > 0 ? ` · ${fmtMoney(montoVencido)}` : ''}
+          </div>
+        </div>
         <div className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#2C2D31', fontFamily: 'var(--font-display)' }}>
             {fmtMoney(montoTotal)}
           </div>
           <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Monto total</div>
-        </div>
-        <div className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#626F77', fontFamily: 'var(--font-display)' }}>
-            {withUrls.length}
-          </div>
-          <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Total archivos</div>
         </div>
       </div>
 
@@ -150,7 +152,7 @@ export default async function FacturasAdminPage({
 
       <div className="card">
         <h3 className="font-display" style={{ fontSize: 16, marginBottom: 16 }}>
-          Facturas registradas ({withUrls.length})
+          Facturas registradas ({lista.length})
         </h3>
 
         {facturas.length === 0 && sueltos.length === 0 ? (
@@ -158,14 +160,20 @@ export default async function FacturasAdminPage({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {facturas.map((f: any) => {
-              const complementos = withUrls.filter((i: any) => i.tipo === 'complemento_pago' && i.factura_id === f.id)
+              const complementos = lista.filter((i: any) => i.tipo === 'complemento_pago' && i.factura_id === f.id)
+              const vencida = estaVencida(f)
               return (
-                <div key={f.id} style={{ border: '1px solid #CBBFA4', borderRadius: 6, padding: 14 }}>
+                <div key={f.id} style={{ border: `1px solid ${vencida ? '#C2492A' : '#CBBFA4'}`, borderRadius: 6, padding: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
                     <div>
                       <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#676F36' }}>
                         Factura
                       </span>
+                      {vencida && (
+                        <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#C2492A', borderColor: '#C2492A', marginLeft: 6 }}>
+                          Vencida
+                        </span>
+                      )}
                       <div style={{ fontWeight: 500, marginTop: 6 }}>{f.profiles?.name || '—'}</div>
                       <div style={{ fontSize: 12, color: '#5B5C60' }}>
                         {fmtDate(f.fecha)}{f.monto ? ` · ${fmtMoney(f.monto)}` : ''}{f.profiles?.rfc ? ` · RFC ${f.profiles.rfc}` : ''}
@@ -187,11 +195,11 @@ export default async function FacturasAdminPage({
                           </button>
                         </form>
                       )}
-                      {f.pdfUrl && (
-                        <a href={f.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>
+                      {f.file_path && (
+                        <a href={dl(f.file_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>
                       )}
-                      {f.xmlUrl && (
-                        <a href={f.xmlUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>
+                      {f.xml_path && f.xml_path !== f.file_path && (
+                        <a href={dl(f.xml_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>
                       )}
                       <DeleteButton invoiceId={f.id} filePath={f.file_path} xmlPath={f.xml_path} />
                     </div>
@@ -213,8 +221,8 @@ export default async function FacturasAdminPage({
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            {c.pdfUrl && <a href={c.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>}
-                            {c.xmlUrl && <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>}
+                            {c.file_path && <a href={dl(c.file_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>}
+                            {c.xml_path && c.xml_path !== c.file_path && <a href={dl(c.xml_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>}
                             <DeleteButton invoiceId={c.id} filePath={c.file_path} xmlPath={c.xml_path} />
                           </div>
                         </div>
@@ -256,8 +264,8 @@ export default async function FacturasAdminPage({
                             </button>
                           </form>
                         )}
-                        {c.pdfUrl && <a href={c.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>}
-                        {c.xmlUrl && <a href={c.xmlUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>}
+                        {c.file_path && <a href={dl(c.file_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#C2492A', textDecoration: 'underline' }}>PDF</a>}
+                        {c.xml_path && c.xml_path !== c.file_path && <a href={dl(c.xml_path)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 600, color: '#626F77', textDecoration: 'underline' }}>XML</a>}
                         <DeleteButton invoiceId={c.id} filePath={c.file_path} xmlPath={c.xml_path} />
                       </div>
                     </div>
