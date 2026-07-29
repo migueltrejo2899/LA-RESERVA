@@ -7,8 +7,6 @@ export default async function EstadoCuenta({ searchParams }: { searchParams: { d
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: profile } = await supabase.from('profiles').select('name').eq('id', user!.id).single()
-
   let ordersQuery = supabase
     .from('orders')
     .select('id, folio, total, created_at')
@@ -18,7 +16,12 @@ export default async function EstadoCuenta({ searchParams }: { searchParams: { d
   if (searchParams.desde) ordersQuery = ordersQuery.gte('created_at', searchParams.desde)
   if (searchParams.hasta) ordersQuery = ordersQuery.lte('created_at', searchParams.hasta + 'T23:59:59')
 
-  const { data: orders } = await ordersQuery
+  // consultas en paralelo
+  const [{ data: profile }, { data: orders }, { data: invoices }] = await Promise.all([
+    supabase.from('profiles').select('name, dias_credito').eq('id', user!.id).single(),
+    ordersQuery,
+    supabase.from('invoices').select('id, tipo, fecha, monto, file_name, factura_id').eq('client_id', user!.id),
+  ])
 
   const orderIds = (orders || []).map((o) => o.id)
   let payments: any[] = []
@@ -56,15 +59,30 @@ export default async function EstadoCuenta({ searchParams }: { searchParams: { d
   const totalCargos = movimientos.reduce((s, m) => s + m.cargo, 0)
   const totalAbonos = movimientos.reduce((s, m) => s + m.abono, 0)
 
+  // facturas vencidas: sin complemento de pago ligado y con más días
+  // transcurridos que los días de crédito del cliente
+  const diasCredito = profile?.dias_credito ?? 30
+  const hoy = new Date()
+  const lista = invoices || []
+  const vencidas = lista
+    .filter((f) => {
+      if (f.tipo !== 'factura') return false
+      const tieneComplemento = lista.some((c) => c.tipo === 'complemento_pago' && c.factura_id === f.id)
+      if (tieneComplemento) return false
+      const limite = new Date(f.fecha)
+      limite.setDate(limite.getDate() + diasCredito)
+      return hoy > limite
+    })
+    .map((f) => {
+      const diasVencida = Math.floor((hoy.getTime() - new Date(f.fecha).getTime()) / 86400000) - diasCredito
+      return { ...f, diasVencida }
+    })
+    .sort((a, b) => b.diasVencida - a.diasVencida)
+
+  const totalVencido = vencidas.reduce((s, f) => s + Number(f.monto || 0), 0)
+
   return (
     <div className="max-w-3xl mx-auto">
-      <style>{`
-        @media print {
-          .no-print { display: none !important }
-          body { padding: 0 }
-        }
-      `}</style>
-
       <div className="no-print flex justify-between items-center mb-5 flex-wrap gap-3">
         <Link href="/portal" className="text-crate underline text-sm font-mono">← Volver</Link>
         <form className="field flex gap-3 items-end flex-wrap" method="get">
@@ -78,7 +96,7 @@ export default async function EstadoCuenta({ searchParams }: { searchParams: { d
         <PrintButton />
       </div>
 
-      <div style={{ border: '2px solid #2C2D31', padding: 24, borderRadius: 4 }}>
+      <div style={{ border: '2px solid #2C2D31', padding: 24, borderRadius: 4, background: '#FBF9F3' }}>
         <div className="flex justify-between items-start border-b-[3px] border-ink pb-3 mb-4">
           <div>
             <div className="font-display text-xl">LA RESERVA</div>
@@ -89,6 +107,37 @@ export default async function EstadoCuenta({ searchParams }: { searchParams: { d
             <div>Generado {fmtDate(new Date().toISOString().slice(0, 10))}</div>
           </div>
         </div>
+
+        {vencidas.length > 0 && (
+          <div className="mb-5 p-3 rounded" style={{ border: '2px solid #C2492A' }}>
+            <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
+              <div className="font-subtitle text-xs uppercase tracking-widest" style={{ color: '#C2492A' }}>
+                Facturas vencidas (crédito de {diasCredito} días)
+              </div>
+              <div className="font-mono font-bold" style={{ color: '#C2492A' }}>{fmtMoney(totalVencido)}</div>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs font-mono uppercase text-inksoft border-b border-line">
+                  <th className="text-left py-1">Fecha</th>
+                  <th className="text-left py-1">Factura</th>
+                  <th className="text-right py-1">Monto</th>
+                  <th className="text-right py-1">Días vencida</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vencidas.map((f) => (
+                  <tr key={f.id} className="border-b border-line">
+                    <td className="py-1">{fmtDate(f.fecha)}</td>
+                    <td className="py-1">{f.file_name}</td>
+                    <td className="py-1 text-right font-mono">{f.monto ? fmtMoney(f.monto) : '—'}</td>
+                    <td className="py-1 text-right font-mono font-semibold" style={{ color: '#C2492A' }}>{f.diasVencida}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <table className="w-full text-sm">
           <thead>
