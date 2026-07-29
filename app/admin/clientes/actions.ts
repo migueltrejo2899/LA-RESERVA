@@ -15,6 +15,7 @@ export async function createClientUser(formData: FormData) {
   const name = String(formData.get('name') || '').trim()
   const contact = String(formData.get('contact') || '').trim()
   const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
+  const diasCredito = Number(formData.get('dias_credito')) || 30
 
   if (!usernameRaw || !username || !password || !name) {
     redirect('/admin/clientes?error=' + encodeURIComponent('Usuario, contraseña y nombre son obligatorios.'))
@@ -42,6 +43,7 @@ export async function createClientUser(formData: FormData) {
     name,
     contact,
     rfc: rfc || null,
+    dias_credito: diasCredito,
   })
 
   if (profileError) {
@@ -75,9 +77,13 @@ export async function updateClientInfo(formData: FormData) {
   const name = String(formData.get('name') || '').trim()
   const contact = String(formData.get('contact') || '').trim()
   const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
+  const diasCredito = Number(formData.get('dias_credito')) || 30
 
   const admin = createAdminClient()
-  const { error } = await admin.from('profiles').update({ name, contact, rfc: rfc || null }).eq('id', clientId)
+  const { error } = await admin
+    .from('profiles')
+    .update({ name, contact, rfc: rfc || null, dias_credito: diasCredito })
+    .eq('id', clientId)
   if (error) {
     redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
   }
