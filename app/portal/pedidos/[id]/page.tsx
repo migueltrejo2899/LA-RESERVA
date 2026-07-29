@@ -16,37 +16,20 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
 
   if (!order) notFound()
 
-  const { data: items } = await supabase.from('order_items').select('*').eq('order_id', order.id)
-  const { data: history } = await supabase.from('order_status_history').select('*').eq('order_id', order.id).order('created_at', { ascending: false })
-  const { data: payments } = await supabase.from('payments').select('*').eq('order_id', order.id).order('fecha', { ascending: false })
-  const { data: invoices } = await supabase
-    .from('invoices')
-    .select('*')
-    .eq('order_id', order.id)
-    .eq('client_id', user!.id)
-    .order('fecha', { ascending: false })
+  // las cuatro consultas corren en paralelo (más rápido que una por una)
+  const [{ data: items }, { data: history }, { data: payments }, { data: invoices }] = await Promise.all([
+    supabase.from('order_items').select('*').eq('order_id', order.id),
+    supabase.from('order_status_history').select('*').eq('order_id', order.id).order('created_at', { ascending: false }),
+    supabase.from('payments').select('*').eq('order_id', order.id).order('fecha', { ascending: false }),
+    supabase.from('invoices').select('*').eq('order_id', order.id).eq('client_id', user!.id).order('fecha', { ascending: false }),
+  ])
 
-  // URLs firmadas de descarga (válidas 1 hora) para cada archivo
-  const invoicesWithUrls = await Promise.all(
-    (invoices || []).map(async (inv) => {
-      let url: string | undefined
-      let xmlUrl: string | undefined
-      if (inv.file_path) {
-        const { data: signed } = await supabase.storage.from('facturas').createSignedUrl(inv.file_path, 3600)
-        url = signed?.signedUrl
-      }
-      if (inv.xml_path) {
-        const { data: signedXml } = await supabase.storage.from('facturas').createSignedUrl(inv.xml_path, 3600)
-        xmlUrl = signedXml?.signedUrl
-      }
-      return { ...inv, url, xmlUrl }
-    })
-  )
-
-  const facturasDelPedido = invoicesWithUrls.filter((i) => i.tipo === 'factura')
+  const facturasDelPedido = (invoices || []).filter((i) => i.tipo === 'factura')
 
   const paid = (payments || []).reduce((s, p) => s + Number(p.monto), 0)
   const saldo = order.total - paid
+
+  const dl = (path: string) => `/descargar?path=${encodeURIComponent(path)}`
 
   return (
     <div className="space-y-5">
@@ -108,7 +91,7 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
       <div className="card">
         <h3 className="font-display text-lg mb-3">Facturas y complementos de pago</h3>
         <div className="divide-y divide-line">
-          {invoicesWithUrls.map((inv) => {
+          {invoices?.map((inv) => {
             const facturaLigada = inv.tipo !== 'factura' && inv.factura_id
               ? facturasDelPedido.find((f) => f.id === inv.factura_id)
               : null
@@ -128,9 +111,9 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
                   )}
                 </div>
                 <div className="flex gap-2">
-                  {inv.url && <a href={inv.url} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
-                  {inv.xmlUrl && inv.xml_path !== inv.file_path && (
-                    <a href={inv.xmlUrl} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
+                  {inv.file_path && <a href={dl(inv.file_path)} target="_blank" rel="noopener noreferrer" className="btn small">Descargar</a>}
+                  {inv.xml_path && inv.xml_path !== inv.file_path && (
+                    <a href={dl(inv.xml_path)} target="_blank" rel="noopener noreferrer" className="btn ghost small">XML</a>
                   )}
                 </div>
               </div>
