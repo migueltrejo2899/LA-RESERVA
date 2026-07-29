@@ -6,7 +6,7 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
   const supabase = createClient()
   const { data: clients } = await supabase
     .from('profiles')
-    .select('id, username, name, contact, rfc')
+    .select('id, username, name, contact, rfc, dias_credito')
     .eq('role', 'client')
     .order('name')
 
@@ -50,6 +50,9 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
             <div><label>RFC (opcional)</label><input type="text" name="rfc" placeholder="ej. XAXX010101000" className="mb-1" />
               <div className="text-xs text-inksoft mb-4">Si lo agregas, sus facturas se archivarán solas al subirlas.</div>
             </div>
+            <div><label>Días de crédito</label><input type="number" name="dias_credito" defaultValue={30} min={0} className="mb-1" />
+              <div className="text-xs text-inksoft mb-4">Plazo para pagar sus facturas. Pasado este plazo, se marcan como vencidas.</div>
+            </div>
           </div>
           {searchParams.error && <div className="text-stamp text-sm font-mono mb-4">{searchParams.error}</div>}
           <button className="btn small">Agregar cliente</button>
@@ -68,7 +71,7 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
               <details key={c.id} className="py-3">
                 <summary className="cursor-pointer flex justify-between items-center flex-wrap gap-2">
                   <div>
-                    <div className="font-mono text-xs text-inksoft">usuario: {c.username} {c.rfc ? `· RFC: ${c.rfc}` : '· sin RFC'}</div>
+                    <div className="font-mono text-xs text-inksoft">usuario: {c.username} {c.rfc ? `· RFC: ${c.rfc}` : '· sin RFC'} · crédito: {c.dias_credito ?? 30} días</div>
                     <div className="font-semibold">{c.name}</div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -81,12 +84,13 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
                   </div>
                 </summary>
                 <div className="mt-3 space-y-3">
-                  <form action={updateClientInfo} className="field grid grid-cols-3 gap-3 items-end">
+                  <form action={updateClientInfo} className="field grid grid-cols-4 gap-3 items-end">
                     <input type="hidden" name="clientId" value={c.id} />
                     <div><label>Nombre / razón social</label><input type="text" name="name" defaultValue={c.name} /></div>
                     <div><label>Contacto</label><input type="text" name="contact" defaultValue={c.contact || ''} /></div>
                     <div><label>RFC</label><input type="text" name="rfc" defaultValue={c.rfc || ''} placeholder="ej. XAXX010101000" /></div>
-                    <button className="btn small w-fit col-span-3">Guardar datos</button>
+                    <div><label>Días de crédito</label><input type="number" name="dias_credito" defaultValue={c.dias_credito ?? 30} min={0} /></div>
+                    <button className="btn small w-fit col-span-4">Guardar datos</button>
                   </form>
                   <form action={updateClientPassword} className="field flex gap-3 items-end">
                     <input type="hidden" name="clientId" value={c.id} />
