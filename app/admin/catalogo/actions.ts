@@ -3,13 +3,20 @@ import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
-const CATEGORIAS_VALIDAS = ['Carne de Res', 'Carne de Cerdo', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
+const CATEGORIAS_VALIDAS = ['Carne de Res', 'Carne de Cerdo', 'Pollo', 'Huevo', 'Chiles', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
 
 function normalizarCategoria(valor: string): string | null {
   const v = valor.trim()
   if (!v) return null
   const match = CATEGORIAS_VALIDAS.find((c) => c.toLowerCase() === v.toLowerCase())
   return match || null
+}
+
+function numeroONull(valor: FormDataEntryValue | null): number | null {
+  const v = String(valor ?? '').trim()
+  if (v === '') return null
+  const n = Number(v)
+  return n > 0 ? n : null
 }
 
 // Parser de CSV sencillo (sin dependencias externas), soporta campos entre
@@ -60,8 +67,8 @@ export async function createProduct(formData: FormData) {
   const descripcion = String(formData.get('descripcion') || '').trim() || null
   const unidad = String(formData.get('unidad') || '').trim() || null
   const categoria = normalizarCategoria(String(formData.get('categoria') || ''))
-  const precioRaw = formData.get('precio')
-  const precio = precioRaw ? Number(precioRaw) : null
+  const precioKilo = numeroONull(formData.get('precio_kilo'))
+  const precioCaja = numeroONull(formData.get('precio_caja'))
   const imagen = formData.get('imagen') as File | null
   if (!sku || !nombre) {
     redirect('/admin/catalogo?error=' + encodeURIComponent('El SKU y el nombre del producto son obligatorios.'))
@@ -77,7 +84,7 @@ export async function createProduct(formData: FormData) {
   }
   const { error } = await supabase
     .from('products')
-    .insert({ sku, nombre, descripcion, unidad, precio, categoria, imagen_path: imagenPath })
+    .insert({ sku, nombre, descripcion, unidad, categoria, precio_kilo: precioKilo, precio_caja: precioCaja, imagen_path: imagenPath })
   if (error) {
     const msg = error.code === '23505' ? `Ya existe un producto con el SKU "${sku}".` : error.message
     redirect('/admin/catalogo?error=' + encodeURIComponent(msg))
@@ -93,18 +100,18 @@ export async function updateProduct(formData: FormData) {
   const descripcion = String(formData.get('descripcion') || '').trim() || null
   const unidad = String(formData.get('unidad') || '').trim() || null
   const categoria = normalizarCategoria(String(formData.get('categoria') || ''))
-  const precioRaw = formData.get('precio')
-  const precio = precioRaw ? Number(precioRaw) : null
+  const precioKilo = numeroONull(formData.get('precio_kilo'))
+  const precioCaja = numeroONull(formData.get('precio_caja'))
   const activo = formData.get('activo') === 'on'
   const publicado = formData.get('publicado') === 'on'
   const imagen = formData.get('imagen') as File | null
   if (!sku || !nombre) {
     redirect('/admin/catalogo?error=' + encodeURIComponent('El SKU y el nombre del producto son obligatorios.'))
   }
-  if (publicado && !precio) {
-    redirect('/admin/catalogo?error=' + encodeURIComponent('Para publicar este producto en el portal necesita tener un precio de venta.'))
+  if (publicado && precioKilo == null && precioCaja == null) {
+    redirect('/admin/catalogo?error=' + encodeURIComponent('Para publicar este producto necesita al menos un precio (por kilo o por caja).'))
   }
-  const update: Record<string, any> = { sku, nombre, descripcion, unidad, precio, categoria, activo, publicado }
+  const update: Record<string, any> = { sku, nombre, descripcion, unidad, categoria, precio_kilo: precioKilo, precio_caja: precioCaja, activo, publicado }
   if (imagen && imagen.size > 0) {
     const path = `${sku}/${Date.now()}-${imagen.name}`
     const { error: uploadError } = await supabase.storage.from('productos').upload(path, imagen)
@@ -135,7 +142,8 @@ export async function deleteProduct(formData: FormData) {
 }
 // Importa/actualiza productos en lote desde un CSV exportado de otra
 // plataforma. Encabezados esperados (en cualquier orden): sku, nombre,
-// descripcion, unidad, precio, categoria. Si el sku ya existe, se actualiza.
+// descripcion, unidad, categoria, precio_kilo, precio_caja.
+// Si el sku ya existe, se actualiza.
 export async function bulkImportProducts(formData: FormData) {
   const supabase = createClient()
   const file = formData.get('file') as File | null
@@ -153,8 +161,9 @@ export async function bulkImportProducts(formData: FormData) {
     nombre: headers.indexOf('nombre'),
     descripcion: headers.indexOf('descripcion'),
     unidad: headers.indexOf('unidad'),
-    precio: headers.indexOf('precio'),
     categoria: headers.indexOf('categoria'),
+    precio_kilo: headers.indexOf('precio_kilo'),
+    precio_caja: headers.indexOf('precio_caja'),
   }
   if (idx.sku === -1 || idx.nombre === -1) {
     redirect('/admin/catalogo?error=' + encodeURIComponent('El CSV debe tener al menos las columnas "sku" y "nombre" en el encabezado.'))
@@ -166,8 +175,9 @@ export async function bulkImportProducts(formData: FormData) {
       nombre: (r[idx.nombre] || '').trim(),
       descripcion: idx.descripcion > -1 ? (r[idx.descripcion] || '').trim() || null : null,
       unidad: idx.unidad > -1 ? (r[idx.unidad] || '').trim() || null : null,
-      precio: idx.precio > -1 && r[idx.precio] ? Number(r[idx.precio]) : null,
       categoria: idx.categoria > -1 ? normalizarCategoria(r[idx.categoria] || '') : null,
+      precio_kilo: idx.precio_kilo > -1 && r[idx.precio_kilo] ? Number(r[idx.precio_kilo]) || null : null,
+      precio_caja: idx.precio_caja > -1 && r[idx.precio_caja] ? Number(r[idx.precio_caja]) || null : null,
     }))
     .filter((it) => it.sku && it.nombre)
   if (items.length === 0) {
@@ -181,7 +191,7 @@ export async function bulkImportProducts(formData: FormData) {
   redirect('/admin/catalogo?ok=' + encodeURIComponent(`Se importaron/actualizaron ${items.length} productos.`))
 }
 // Publica o despublica varios productos a la vez en el portal del cliente.
-// Al publicar, se omiten los que no tengan precio de venta capturado.
+// Al publicar, se omiten los que no tengan ningún precio capturado.
 export async function bulkPublicar(formData: FormData) {
   const supabase = createClient()
   const ids = formData.getAll('ids') as string[]
@@ -190,8 +200,8 @@ export async function bulkPublicar(formData: FormData) {
     redirect('/admin/catalogo?error=' + encodeURIComponent('Selecciona al menos un producto (con la casilla a la izquierda).'))
   }
   if (modo === 'publicar') {
-    const { data: seleccionados } = await supabase.from('products').select('id, precio').in('id', ids)
-    const publicables = (seleccionados || []).filter((p) => p.precio != null).map((p) => p.id)
+    const { data: seleccionados } = await supabase.from('products').select('id, precio_kilo, precio_caja').in('id', ids)
+    const publicables = (seleccionados || []).filter((p) => p.precio_kilo != null || p.precio_caja != null).map((p) => p.id)
     const omitidos = ids.length - publicables.length
     if (publicables.length > 0) {
       await supabase.from('products').update({ publicado: true }).in('id', publicables)
@@ -201,7 +211,7 @@ export async function bulkPublicar(formData: FormData) {
     if (omitidos > 0) {
       redirect(
         '/admin/catalogo?error=' +
-          encodeURIComponent(`Se publicaron ${publicables.length} producto(s). ${omitidos} no se publicaron por no tener precio de venta.`)
+          encodeURIComponent(`Se publicaron ${publicables.length} producto(s). ${omitidos} no se publicaron por no tener ningún precio capturado.`)
       )
     }
     redirect('/admin/catalogo?ok=' + encodeURIComponent(`Se publicaron ${publicables.length} producto(s).`))
