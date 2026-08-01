@@ -7,8 +7,10 @@ export default async function PortalLayout({ children }: { children: React.React
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase.from('profiles').select('role, name').eq('id', user.id).single()
+  const { data: profile } = await supabase.from('profiles').select('role, name, username').eq('id', user.id).single()
   if (profile?.role !== 'client') redirect('/login')
+
+  const esPublico = profile?.username?.toLowerCase() === 'publico'
 
   async function signOut() {
     'use server'
@@ -31,11 +33,17 @@ export default async function PortalLayout({ children }: { children: React.React
           <form action={signOut}><button className="text-stamp underline">salir</button></form>
         </div>
       </div>
-      <div className="no-print flex gap-1 mb-5 border-b border-line font-subtitle text-xs uppercase tracking-wide">
-        <Link href="/portal" className="px-4 py-2">Pedidos</Link>
-        <Link href="/portal/facturas" className="px-4 py-2">Facturas</Link>
-        <Link href="/portal/catalogo" className="px-4 py-2">Catálogo</Link>
-        <Link href="/portal/estado-cuenta" className="px-4 py-2">Estado de cuenta</Link>
+      <div className="no-print flex gap-1 mb-5 border-b border-line font-subtitle text-xs uppercase tracking-wide flex-wrap">
+        {esPublico ? (
+          <Link href="/portal/catalogo" className="px-4 py-2">Catálogo</Link>
+        ) : (
+          <>
+            <Link href="/portal" className="px-4 py-2">Pedidos</Link>
+            <Link href="/portal/facturas" className="px-4 py-2">Facturas</Link>
+            <Link href="/portal/catalogo" className="px-4 py-2">Catálogo</Link>
+            <Link href="/portal/estado-cuenta" className="px-4 py-2">Estado de cuenta</Link>
+          </>
+        )}
       </div>
       {children}
     </div>
