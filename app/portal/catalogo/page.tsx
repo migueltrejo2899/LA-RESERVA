@@ -1,19 +1,20 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
 import Link from 'next/link'
+import { crearPedidoCliente } from './actions'
 
 const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Pollo', 'Huevo', 'Chiles', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
 
 export default async function PortalCatalogoPage({
   searchParams,
 }: {
-  searchParams: { categoria?: string }
+  searchParams: { categoria?: string; error?: string }
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // productos publicados y precios especiales del cliente, en paralelo
-  const [{ data: products }, { data: precios }] = await Promise.all([
+  const [{ data: profile }, { data: products }, { data: precios }] = await Promise.all([
+    supabase.from('profiles').select('username').eq('id', user!.id).single(),
     supabase
       .from('products')
       .select('*')
@@ -23,6 +24,7 @@ export default async function PortalCatalogoPage({
     supabase.from('client_prices').select('product_id, precio_kilo, precio_caja').eq('client_id', user!.id),
   ])
 
+  const esPublico = profile?.username?.toLowerCase() === 'publico'
   const especialDe = new Map((precios || []).map((p) => [p.product_id, p]))
 
   const todos = (products || []).map((p) => {
@@ -45,7 +47,6 @@ export default async function PortalCatalogoPage({
       : todos.filter((p) => p.categoria === categoriaSel)
     : todos
 
-  // agrupar por categoría (solo cuando se muestran todas)
   const grupos = CATEGORIAS.map((cat) => ({
     nombre: cat,
     items: todos.filter((p) => p.categoria === cat),
@@ -85,12 +86,71 @@ export default async function PortalCatalogoPage({
           <div className="text-xs text-right" style={{ color: '#676F36' }}>tu precio especial</div>
         )}
       </div>
+      {!esPublico && (
+        <div className="field grid grid-cols-2 gap-2 mt-3 pt-3" style={{ borderTop: '1px dashed #CBBFA4' }}>
+          <input type="hidden" name="productId" value={p.id} />
+          {p.kilo != null ? (
+            <div>
+              <label>Kilos</label>
+              <input type="number" step="0.01" min="0" name="kilos" placeholder="0" />
+            </div>
+          ) : (
+            <input type="hidden" name="kilos" value="" />
+          )}
+          {p.caja != null ? (
+            <div>
+              <label>Cajas</label>
+              <input type="number" step="1" min="0" name="cajas" placeholder="0" />
+            </div>
+          ) : (
+            <input type="hidden" name="cajas" value="" />
+          )}
+        </div>
+      )}
     </div>
+  )
+
+  const Catalogo = () => (
+    <>
+      {todos.length === 0 && (
+        <p className="text-inksoft text-sm">Todavía no hay productos publicados.</p>
+      )}
+
+      {categoriaSel ? (
+        <>
+          {visibles.length === 0 && (
+            <p className="text-inksoft text-sm">No hay productos en esta categoría.</p>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
+            {visibles.map((p) => <Producto key={p.id} p={p} />)}
+          </div>
+        </>
+      ) : (
+        <div className="space-y-6">
+          {grupos.map((g) => (
+            <div key={g.nombre}>
+              <div className="font-subtitle text-xs uppercase tracking-widest text-inksoft border-b border-line pb-2 mb-3">
+                {g.nombre} ({g.items.length})
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
+                {g.items.map((p) => <Producto key={p.id} p={p} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   )
 
   return (
     <div className="card">
-      <h3 className="font-display text-lg mb-4">Catálogo de productos</h3>
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+        <h3 className="font-display text-lg">Catálogo de productos</h3>
+      </div>
+
+      {searchParams.error && (
+        <div className="text-sm font-mono mb-4" style={{ color: '#C2492A' }}>{searchParams.error}</div>
+      )}
 
       <div className="flex flex-wrap gap-2 mb-5">
         <Link
@@ -121,32 +181,22 @@ export default async function PortalCatalogoPage({
         )}
       </div>
 
-      {todos.length === 0 && (
-        <p className="text-inksoft text-sm">Todavía no hay productos publicados.</p>
-      )}
-
-      {categoriaSel ? (
-        <>
-          {visibles.length === 0 && (
-            <p className="text-inksoft text-sm">No hay productos en esta categoría.</p>
-          )}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
-            {visibles.map((p) => <Producto key={p.id} p={p} />)}
-          </div>
-        </>
+      {esPublico ? (
+        <Catalogo />
       ) : (
-        <div className="space-y-6">
-          {grupos.map((g) => (
-            <div key={g.nombre}>
-              <div className="font-subtitle text-xs uppercase tracking-widest text-inksoft border-b border-line pb-2 mb-3">
-                {g.nombre} ({g.items.length})
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
-                {g.items.map((p) => <Producto key={p.id} p={p} />)}
-              </div>
+        <form action={crearPedidoCliente}>
+          <div className="mb-5 p-3 rounded text-sm text-inksoft" style={{ background: '#EFE6D6', border: '1px dashed #CBBFA4' }}>
+            Captura las cantidades que necesitas (kilos y/o cajas) en los productos que quieras y da
+            clic en <strong>Hacer pedido</strong>. Al enviarlo podrás descargar tu picking list para
+            verificar tu pedido cuando te llegue.
+          </div>
+          <Catalogo />
+          {todos.length > 0 && (
+            <div className="mt-6 pt-4 flex justify-end" style={{ borderTop: '2px solid #2C2D31' }}>
+              <button className="btn">Hacer pedido</button>
             </div>
-          ))}
-        </div>
+          )}
+        </form>
       )}
     </div>
   )
