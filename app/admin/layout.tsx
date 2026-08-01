@@ -26,12 +26,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <form action={signOut}><button className="text-stamp underline">salir</button></form>
         </div>
       </div>
-      <div className="no-print flex gap-1 mb-5 border-b border-line font-subtitle text-xs uppercase tracking-wide">
+      <div className="no-print flex gap-1 mb-5 border-b border-line font-subtitle text-xs uppercase tracking-wide flex-wrap">
         <Link href="/admin" className="px-4 py-2">Resumen</Link>
         <Link href="/admin/pedidos" className="px-4 py-2">Pedidos</Link>
         <Link href="/admin/clientes" className="px-4 py-2">Clientes</Link>
         <Link href="/admin/facturas" className="px-4 py-2">Facturas</Link>
         <Link href="/admin/catalogo" className="px-4 py-2">Catálogo</Link>
+        <Link href="/admin/catalogo/precios" className="px-4 py-2">Precios</Link>
       </div>
       {children}
     </div>
