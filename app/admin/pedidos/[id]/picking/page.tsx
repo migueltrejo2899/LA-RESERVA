@@ -24,19 +24,12 @@ export default async function PickingList({ params }: { params: { id: string } }
 
   return (
     <div className="max-w-2xl mx-auto">
-      <style>{`
-        @media print {
-          .no-print { display: none !important }
-          body { padding: 0 }
-        }
-      `}</style>
-
       <div className="no-print flex justify-between items-center mb-5">
         <Link href={`/admin/pedidos/${order.id}`} className="text-crate underline text-sm font-mono">← Volver al pedido</Link>
         <PrintButton />
       </div>
 
-      <div style={{ border: '2px solid #2C2D31', padding: 24, borderRadius: 4 }}>
+      <div style={{ border: '2px solid #2C2D31', padding: 24, borderRadius: 4, background: '#FBF9F3' }}>
         <div className="flex justify-between items-start border-b-[3px] border-ink pb-3 mb-4">
           <div>
             <div className="font-display text-xl">LA RESERVA</div>
@@ -88,6 +81,11 @@ export default async function PickingList({ params }: { params: { id: string } }
             <div className="text-xs text-inksoft mt-1">Revisado por / fecha</div>
           </div>
         </div>
+
+        <p className="text-xs text-inksoft mt-6 pt-4" style={{ borderTop: '1px solid #CBBFA4', fontStyle: 'italic' }}>
+          En La Reserva nos preocupamos por tus pedidos, por lo que es de gran importancia mencionar
+          que los pesos de algunos productos no pueden ser totalmente exactos, agradecemos su comprensión.
+        </p>
       </div>
     </div>
   )
