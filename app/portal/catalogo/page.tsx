@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
 import Link from 'next/link'
 
-const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
+const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Pollo', 'Huevo', 'Chiles', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
 
 export default async function PortalCatalogoPage({
   searchParams,
@@ -20,16 +20,21 @@ export default async function PortalCatalogoPage({
       .eq('publicado', true)
       .eq('activo', true)
       .order('nombre'),
-    supabase.from('client_prices').select('product_id, precio').eq('client_id', user!.id),
+    supabase.from('client_prices').select('product_id, precio_kilo, precio_caja').eq('client_id', user!.id),
   ])
 
-  const precioEspecial = new Map((precios || []).map((p) => [p.product_id, Number(p.precio)]))
+  const especialDe = new Map((precios || []).map((p) => [p.product_id, p]))
 
-  const todos = (products || []).map((p) => ({
-    ...p,
-    imagenUrl: p.imagen_path ? supabase.storage.from('productos').getPublicUrl(p.imagen_path).data.publicUrl : null,
-    especial: precioEspecial.get(p.id),
-  }))
+  const todos = (products || []).map((p) => {
+    const esp = especialDe.get(p.id)
+    return {
+      ...p,
+      imagenUrl: p.imagen_path ? supabase.storage.from('productos').getPublicUrl(p.imagen_path).data.publicUrl : null,
+      kilo: esp?.precio_kilo ?? p.precio_kilo,
+      caja: esp?.precio_caja ?? p.precio_caja,
+      tieneEspecial: esp != null && (esp.precio_kilo != null || esp.precio_caja != null),
+    }
+  })
 
   const hayOtros = todos.some((p) => !p.categoria || !CATEGORIAS.includes(p.categoria))
   const categoriaSel = searchParams.categoria || ''
@@ -63,14 +68,22 @@ export default async function PortalCatalogoPage({
       <div className="font-mono text-xs text-inksoft">{p.sku}</div>
       <div className="font-semibold text-sm">{p.nombre}</div>
       {p.descripcion && <div className="text-xs text-inksoft mt-1">{p.descripcion}</div>}
-      <div className="flex justify-between items-center mt-2">
-        <span className="text-xs text-inksoft">{p.unidad || ''}</span>
-        <span className="text-right">
-          <span className="font-mono font-bold">{fmtMoney(p.especial ?? (p.precio || 0))}</span>
-          {p.especial != null && (
-            <span className="block text-xs" style={{ color: '#676F36' }}>tu precio especial</span>
-          )}
-        </span>
+      <div className="mt-2">
+        {p.kilo != null && (
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-inksoft">Kilo (menudeo)</span>
+            <span className="font-mono font-bold">{fmtMoney(p.kilo)}</span>
+          </div>
+        )}
+        {p.caja != null && (
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-inksoft">Caja (mayoreo)</span>
+            <span className="font-mono font-bold">{fmtMoney(p.caja)}</span>
+          </div>
+        )}
+        {p.tieneEspecial && (
+          <div className="text-xs text-right" style={{ color: '#676F36' }}>tu precio especial</div>
+        )}
       </div>
     </div>
   )
