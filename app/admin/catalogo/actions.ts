@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
-export const CATEGORIAS_VALIDAS = ['Carne de Res', 'Carne de Cerdo', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
+const CATEGORIAS_VALIDAS = ['Carne de Res', 'Carne de Cerdo', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
 
 function normalizarCategoria(valor: string): string | null {
   const v = valor.trim()
