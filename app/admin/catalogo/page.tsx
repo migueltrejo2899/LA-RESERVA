@@ -2,16 +2,15 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
 import { createProduct, updateProduct, deleteProduct, bulkImportProducts, bulkPublicar } from './actions'
 
+const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
+
 export default async function CatalogoPage({ searchParams }: { searchParams: { error?: string; ok?: string } }) {
   const supabase = createClient()
-
   const { data: products } = await supabase.from('products').select('*').order('nombre')
-
   const withImg = (products || []).map((p) => ({
     ...p,
     imagenUrl: p.imagen_path ? supabase.storage.from('productos').getPublicUrl(p.imagen_path).data.publicUrl : null,
   }))
-
   return (
     <div className="space-y-5">
       <div className="card">
@@ -37,7 +36,14 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
             <label>Precio de venta (opcional)</label>
             <input type="number" step="0.01" name="precio" placeholder="0.00" />
           </div>
-          <div className="col-span-2">
+          <div>
+            <label>Categoría</label>
+            <select name="categoria" defaultValue="">
+              <option value="">Sin categoría</option>
+              {CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
             <label>Descripción (opcional)</label>
             <input type="text" name="descripcion" placeholder="Notas del producto" />
           </div>
@@ -48,30 +54,26 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
           <button className="btn small col-span-2 w-fit">Agregar producto</button>
         </form>
       </div>
-
       <div className="card">
         <h3 className="font-display text-lg mb-4">Importar SKUs desde otra plataforma (CSV)</h3>
         <p className="text-sm text-inksoft mb-3">
           El archivo debe tener encabezados: <span className="font-mono">sku, nombre</span> (obligatorios) y, si quieres,{' '}
-          <span className="font-mono">descripcion, unidad, precio</span>. Si el SKU ya existe en el catálogo, se actualiza; si no, se crea.
+          <span className="font-mono">descripcion, unidad, precio, categoria</span>. La categoría debe decir exactamente:
+          Carne de Res, Carne de Cerdo, Frutas y Verduras, Lácteos o Bebidas. Si el SKU ya existe en el catálogo, se actualiza; si no, se crea.
         </p>
         <form action={bulkImportProducts} className="field flex flex-wrap gap-3 items-end" encType="multipart/form-data">
           <input type="file" name="file" accept=".csv" />
           <button className="btn small">Importar CSV</button>
         </form>
       </div>
-
       <form id="bulk-form" action={bulkPublicar} className="card flex flex-wrap gap-3 items-center">
         <span className="text-xs text-inksoft">Con los productos marcados abajo (casilla a la izquierda de cada uno):</span>
         <button className="btn small" name="modo" value="publicar">Publicar en el portal del cliente</button>
         <button className="btn ghost small" name="modo" value="despublicar">Quitar del portal</button>
       </form>
-
       <div className="card">
         <h3 className="font-display text-lg mb-4">Catálogo ({withImg.length})</h3>
-
         {withImg.length === 0 && <p className="text-inksoft text-sm">Aún no hay productos en el catálogo.</p>}
-
         <div className="divide-y divide-line">
           {withImg.map((p) => (
             <div key={p.id} className="py-3 flex items-start gap-3">
@@ -90,7 +92,7 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                     )}
                     <div>
                       <div className="font-mono text-xs text-inksoft">
-                        {p.sku}{!p.activo ? ' · inactivo' : ''}
+                        {p.sku}{p.categoria ? ` · ${p.categoria}` : ' · sin categoría'}{!p.activo ? ' · inactivo' : ''}
                       </div>
                       <div className="font-semibold">{p.nombre}</div>
                     </div>
@@ -108,7 +110,14 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                     <div><label>Nombre</label><input type="text" name="nombre" defaultValue={p.nombre} /></div>
                     <div><label>Unidad</label><input type="text" name="unidad" defaultValue={p.unidad || ''} /></div>
                     <div><label>Precio de venta</label><input type="number" step="0.01" name="precio" defaultValue={p.precio ?? ''} /></div>
-                    <div className="col-span-2">
+                    <div>
+                      <label>Categoría</label>
+                      <select name="categoria" defaultValue={p.categoria || ''}>
+                        <option value="">Sin categoría</option>
+                        {CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
                       <label>Descripción</label>
                       <input type="text" name="descripcion" defaultValue={p.descripcion || ''} />
                     </div>
