@@ -1,172 +1,132 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { bulkUploadInvoices, type UploadResult } from './actions'
 
+function baseDe(nombre: string) {
+  const dot = nombre.lastIndexOf('.')
+  const base = dot > -1 ? nombre.slice(0, dot) : nombre
+  return base.replace(/\s*\(\d+\)\s*$/, '').trim().toLowerCase()
+}
+
+function extDe(nombre: string) {
+  const dot = nombre.lastIndexOf('.')
+  return dot > -1 ? nombre.slice(dot + 1).toLowerCase() : ''
+}
+
+// agrupa los archivos de una lista en pares XML+PDF por nombre base,
+// para que cada par viaje junto en la misma llamada al servidor
+function agrupar(files: File[]): File[][] {
+  const grupos = new Map<string, File[]>()
+  for (const f of files) {
+    if (!['pdf', 'xml'].includes(extDe(f.name))) continue
+    const base = baseDe(f.name)
+    const g = grupos.get(base) || []
+    g.push(f)
+    grupos.set(base, g)
+  }
+  return Array.from(grupos.values())
+}
+
 export default function UploadForm() {
-  const [results, setResults] = useState<UploadResult[]>([])
-  const [uploading, setUploading] = useState(false)
-  const [dragActive, setDragActive] = useState(false)
-  const [fileCount, setFileCount] = useState(0)
-  const formRef = useRef<HTMLFormElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
+  const [procesando, setProcesando] = useState(false)
+  const [progreso, setProgreso] = useState('')
+  const [resultados, setResultados] = useState<UploadResult[]>([])
+  const facturasRef = useRef<HTMLInputElement>(null)
+  const complementosRef = useRef<HTMLInputElement>(null)
+  const sueltosRef = useRef<HTMLInputElement>(null)
 
-  function handleFiles(files: FileList | null) {
-    if (!files) return
-    setFileCount(files.length)
-  }
+  async function procesar() {
+    const facturas = agrupar(Array.from(facturasRef.current?.files || []))
+    const sueltos = agrupar(Array.from(sueltosRef.current?.files || []))
+    const complementos = agrupar(Array.from(complementosRef.current?.files || []))
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const form = formRef.current
-    if (!form) return
-    const fd = new FormData(form)
-    const files = fd.getAll('files') as File[]
-    if (files.length === 0 || (files.length === 1 && files[0].size === 0)) return
+    // primero las facturas y al final los complementos, para que cada
+    // complemento encuentre su factura ya registrada y se ligue solo
+    const grupos = [...facturas, ...sueltos, ...complementos]
 
-    setUploading(true)
-    setResults([])
-    try {
-      const res = await bulkUploadInvoices(fd)
-      setResults(res)
-      // limpiar formulario
-      form.reset()
-      setFileCount(0)
-    } catch (err: any) {
-      setResults([{ fileName: '(error)', status: 'error', message: err?.message || 'Error inesperado al subir.' }])
-    } finally {
-      setUploading(false)
+    if (grupos.length === 0) {
+      setProgreso('Selecciona al menos una carpeta o archivos (PDF/XML).')
+      return
     }
-  }
 
-  function handleDrag(e: React.DragEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true)
-    else if (e.type === 'dragleave') setDragActive(false)
-  }
+    setProcesando(true)
+    setResultados([])
+    const acumulados: UploadResult[] = []
 
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(false)
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const dt = new DataTransfer()
-      Array.from(e.dataTransfer.files).forEach(f => dt.items.add(f))
-      if (inputRef.current) {
-        inputRef.current.files = dt.files
-        setFileCount(dt.files.length)
+    for (let i = 0; i < grupos.length; i++) {
+      setProgreso(`Procesando documento ${i + 1} de ${grupos.length}…`)
+      const fd = new FormData()
+      for (const f of grupos[i]) fd.append('files', f)
+      try {
+        const res = await bulkUploadInvoices(fd)
+        acumulados.push(...res)
+      } catch {
+        acumulados.push({
+          fileName: grupos[i][0]?.name || '(desconocido)',
+          status: 'error',
+          message: 'Falló la subida de este documento (revisa tu conexión o el tamaño del archivo).',
+        })
       }
+      setResultados([...acumulados])
     }
+
+    const ok = acumulados.filter((r) => r.status === 'ok').length
+    setProgreso(`Terminado: ${ok} de ${grupos.length} documento(s) registrados correctamente.`)
+    setProcesando(false)
+    if (facturasRef.current) facturasRef.current.value = ''
+    if (complementosRef.current) complementosRef.current.value = ''
+    if (sueltosRef.current) sueltosRef.current.value = ''
+    router.refresh()
   }
 
   return (
-    <div className="card mb-6">
-      <h3 className="font-display text-lg mb-1" style={{ fontFamily: 'var(--font-display)' }}>
-        Subir facturas
-      </h3>
-      <p className="text-sm mb-4" style={{ color: '#5B5C60' }}>
-        Arrastra pares de archivos XML + PDF con el mismo nombre base. El sistema lee automáticamente
-        el RFC del receptor para asignar cada factura al cliente correcto.
+    <div className="card">
+      <h3 className="font-display text-lg mb-2">Subir facturas y complementos</h3>
+      <p className="text-sm text-inksoft mb-4">
+        Selecciona la carpeta completa de facturas y la de complementos de pago (con sus XML y PDF).
+        Se procesan uno por uno: cada archivo se asigna a su cliente por RFC, se crea el pedido desde
+        el XML de la factura, y cada complemento se liga a su factura y registra su pago automáticamente.
       </p>
 
-      <form ref={formRef} onSubmit={handleSubmit}>
-        {/* Drop zone */}
-        <div
-          onDragEnter={handleDrag}
-          onDragLeave={handleDrag}
-          onDragOver={handleDrag}
-          onDrop={handleDrop}
-          onClick={() => inputRef.current?.click()}
-          style={{
-            border: `2px dashed ${dragActive ? '#676F36' : '#CBBFA4'}`,
-            borderRadius: 4,
-            padding: '32px 24px',
-            textAlign: 'center',
-            cursor: 'pointer',
-            background: dragActive ? 'rgba(103,111,54,0.06)' : '#EFE6D6',
-            transition: 'all 0.2s ease',
-          }}
-        >
-          <input
-            ref={inputRef}
-            type="file"
-            name="files"
-            accept=".xml,.pdf"
-            multiple
-            onChange={(e) => handleFiles(e.target.files)}
-            style={{ display: 'none' }}
-          />
-          <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.5 }}>📄</div>
-          {fileCount > 0 ? (
-            <p className="text-sm" style={{ color: '#676F36', fontWeight: 600 }}>
-              {fileCount} archivo{fileCount !== 1 ? 's' : ''} seleccionado{fileCount !== 1 ? 's' : ''}
-            </p>
-          ) : (
-            <>
-              <p className="text-sm" style={{ fontWeight: 500, color: '#2C2D31' }}>
-                Arrastra aquí tus archivos XML y PDF
-              </p>
-              <p className="text-sm" style={{ color: '#5B5C60', marginTop: 4 }}>
-                o haz clic para seleccionar
-              </p>
-            </>
-          )}
+      <div className="field grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        <div>
+          <label>Carpeta de facturas</label>
+          <input type="file" multiple ref={facturasRef} {...({ webkitdirectory: '' } as any)} disabled={procesando} />
         </div>
-
-        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button type="submit" className="btn" disabled={uploading || fileCount === 0}>
-            {uploading ? 'Subiendo…' : 'Subir facturas'}
-          </button>
-          {fileCount > 0 && !uploading && (
-            <button
-              type="button"
-              className="btn ghost small"
-              onClick={() => {
-                formRef.current?.reset()
-                setFileCount(0)
-                setResults([])
-              }}
-            >
-              Limpiar
-            </button>
-          )}
+        <div>
+          <label>Carpeta de complementos de pago</label>
+          <input type="file" multiple ref={complementosRef} {...({ webkitdirectory: '' } as any)} disabled={procesando} />
         </div>
-      </form>
+        <div>
+          <label>O archivos sueltos (opcional)</label>
+          <input type="file" multiple accept=".pdf,.xml" ref={sueltosRef} disabled={procesando} />
+        </div>
+      </div>
 
-      {/* Resultados del upload */}
-      {results.length > 0 && (
-        <div style={{ marginTop: 20 }}>
-          <h4 className="text-sm" style={{ fontWeight: 600, marginBottom: 8, fontFamily: 'var(--font-subtitle)' }}>
-            Resultado de la carga
-          </h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {results.map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: 3,
-                  fontSize: 13,
-                  border: '1px solid',
-                  borderColor: r.status === 'ok' ? '#676F36' : r.status === 'sin_rfc_coincidente' ? '#C2492A' : '#CBBFA4',
-                  background: r.status === 'ok' ? 'rgba(103,111,54,0.08)' : r.status === 'sin_rfc_coincidente' ? 'rgba(194,73,42,0.06)' : '#FBF9F3',
-                }}
-              >
-                <span style={{ fontWeight: 600 }}>
-                  {r.status === 'ok' ? '✓' : r.status === 'sin_rfc_coincidente' ? '⚠' : '✗'}
+      <div className="mt-4 flex items-center gap-4 flex-wrap">
+        <button className="btn small" onClick={procesar} disabled={procesando}>
+          {procesando ? 'Procesando…' : 'Subir y procesar'}
+        </button>
+        {progreso && <span className="text-sm font-mono text-inksoft">{progreso}</span>}
+      </div>
+
+      {resultados.length > 0 && (
+        <div className="mt-4 divide-y divide-line text-sm" style={{ maxHeight: 260, overflowY: 'auto' }}>
+          {resultados.map((r, i) => (
+            <div key={i} className="py-1.5 flex justify-between gap-3 flex-wrap">
+              <span className="font-mono text-xs">{r.fileName}</span>
+              {r.status === 'ok' ? (
+                <span className="text-xs font-semibold" style={{ color: '#676F36' }}>
+                  Registrado{r.clientName ? ` → ${r.clientName}` : ''}
                 </span>
-                {' '}
-                <span style={{ fontWeight: 500 }}>{r.fileName}</span>
-                {r.status === 'ok' && r.clientName && (
-                  <span style={{ color: '#676F36' }}> → {r.clientName}</span>
-                )}
-                {r.message && (
-                  <span style={{ color: '#5B5C60' }}> — {r.message}</span>
-                )}
-              </div>
-            ))}
-          </div>
+              ) : (
+                <span className="text-xs" style={{ color: '#C2492A' }}>{r.message}</span>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
