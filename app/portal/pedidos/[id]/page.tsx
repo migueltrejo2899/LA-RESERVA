@@ -33,7 +33,10 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
 
   return (
     <div className="space-y-5">
-      <Link href="/portal" className="text-crate underline text-sm font-mono">← Volver a mis pedidos</Link>
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <Link href="/portal" className="text-crate underline text-sm font-mono">← Volver a mis pedidos</Link>
+        <Link href={`/portal/pedidos/${order.id}/picking`} className="btn ghost small">Picking list</Link>
+      </div>
 
       <div className="card">
         <div className="text-xs font-mono uppercase tracking-widest text-inksoft">{order.folio}</div>
