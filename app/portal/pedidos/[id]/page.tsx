@@ -49,7 +49,13 @@ export default async function ClientOrderDetail({ params }: { params: { id: stri
           <tbody>
             {items?.map((it) => (
               <tr key={it.id} className="border-b border-line">
-                <td className="py-2">{it.producto}</td><td>{it.cantidad}</td><td>{fmtMoney(it.precio)}</td><td>{fmtMoney(it.cantidad * it.precio)}</td>
+                <td className="py-2">
+                  {it.producto}
+                  {it.recibido && (
+                    <span className="font-mono text-xs ml-2" style={{ color: '#676F36', fontWeight: 700 }}>✓ recibido</span>
+                  )}
+                </td>
+                <td>{it.cantidad}</td><td>{fmtMoney(it.precio)}</td><td>{fmtMoney(it.cantidad * it.precio)}</td>
               </tr>
             ))}
           </tbody>
