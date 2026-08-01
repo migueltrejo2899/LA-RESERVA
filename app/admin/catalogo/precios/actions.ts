@@ -32,3 +32,32 @@ export async function setClientPrice(formData: FormData) {
   revalidatePath('/admin/catalogo/precios')
   redirect(`/admin/catalogo/precios?cliente=${clientId}`)
 }
+
+// Actualiza de un jalón los precios generales del catálogo: recibe todos
+// los productos con su precio capturado y guarda solo los que cambiaron.
+export async function updatePreciosMasivos(formData: FormData) {
+  const supabase = createClient()
+  const ids = formData.getAll('productId') as string[]
+  const precios = formData.getAll('precio') as string[]
+  const originales = formData.getAll('precioOriginal') as string[]
+
+  let actualizados = 0
+
+  for (let i = 0; i < ids.length; i++) {
+    const nuevoRaw = String(precios[i] ?? '').trim()
+    const originalRaw = String(originales[i] ?? '').trim()
+
+    if (nuevoRaw === originalRaw) continue
+
+    const nuevo = nuevoRaw === '' ? null : Number(nuevoRaw)
+    if (nuevoRaw !== '' && (!nuevo || nuevo <= 0)) continue
+
+    const { error } = await supabase.from('products').update({ precio: nuevo }).eq('id', ids[i])
+    if (!error) actualizados++
+  }
+
+  revalidatePath('/admin/catalogo')
+  revalidatePath('/admin/catalogo/precios')
+  revalidatePath('/portal/catalogo')
+  redirect('/admin/catalogo/precios?ok=' + encodeURIComponent(`Se actualizaron ${actualizados} precio(s).`))
+}
