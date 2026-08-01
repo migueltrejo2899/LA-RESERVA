@@ -29,6 +29,8 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
   const paid = (payments || []).reduce((s, p) => s + Number(p.monto), 0)
   const saldo = order.total - paid
 
+  const recibidos = (items || []).filter((i) => i.recibido).length
+
   return (
     <div className="space-y-5">
       <div className="flex justify-between items-center flex-wrap gap-2">
@@ -59,6 +61,12 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
             <div className="text-sm text-inksoft mb-2">Creado {fmtDate(order.created_at)}</div>
           </div>
         </div>
+
+        {recibidos > 0 && (
+          <div className="mb-3 p-2 rounded text-sm" style={{ border: '1px solid #676F36', color: '#676F36', background: '#FBF9F3' }}>
+            El cliente marcó {recibidos} de {items?.length || 0} artículo(s) como recibidos.
+          </div>
+        )}
 
         <details className="mb-2">
           <summary className="cursor-pointer text-xs font-mono text-crate underline">editar cliente / folio</summary>
@@ -104,7 +112,12 @@ export default async function PedidoDetail({ params, searchParams }: { params: {
                 <td colSpan={5} className="py-2">
                   <details>
                     <summary className="cursor-pointer list-none grid grid-cols-4 gap-2 items-center">
-                      <span>{it.producto}</span>
+                      <span>
+                        {it.producto}
+                        {it.recibido && (
+                          <span className="font-mono text-xs ml-2" style={{ color: '#676F36', fontWeight: 700 }}>✓ recibido</span>
+                        )}
+                      </span>
                       <span>{it.cantidad}</span>
                       <span>{fmtMoney(it.precio)}</span>
                       <span className="flex justify-between items-center">
