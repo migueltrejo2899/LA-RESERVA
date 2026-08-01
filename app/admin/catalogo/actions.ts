@@ -19,6 +19,17 @@ function numeroONull(valor: FormDataEntryValue | null): number | null {
   return n > 0 ? n : null
 }
 
+// Limpia un texto para usarlo como ruta de archivo en el storage:
+// quita acentos y ñ, y reemplaza cualquier otro carácter raro por guion.
+// (El SKU y el nombre del producto se guardan igual; esto solo afecta
+// la ruta interna del archivo de la foto.)
+function rutaSegura(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '-')
+}
+
 // Parser de CSV sencillo (sin dependencias externas), soporta campos entre
 // comillas con comas o comillas escapadas adentro.
 function parseCSV(text: string): string[][] {
@@ -75,7 +86,7 @@ export async function createProduct(formData: FormData) {
   }
   let imagenPath: string | null = null
   if (imagen && imagen.size > 0) {
-    const path = `${sku}/${Date.now()}-${imagen.name}`
+    const path = `${rutaSegura(sku)}/${Date.now()}-${rutaSegura(imagen.name)}`
     const { error: uploadError } = await supabase.storage.from('productos').upload(path, imagen)
     if (uploadError) {
       redirect('/admin/catalogo?error=' + encodeURIComponent('No se pudo subir la foto: ' + uploadError.message))
@@ -113,7 +124,7 @@ export async function updateProduct(formData: FormData) {
   }
   const update: Record<string, any> = { sku, nombre, descripcion, unidad, categoria, precio_kilo: precioKilo, precio_caja: precioCaja, activo, publicado }
   if (imagen && imagen.size > 0) {
-    const path = `${sku}/${Date.now()}-${imagen.name}`
+    const path = `${rutaSegura(sku)}/${Date.now()}-${rutaSegura(imagen.name)}`
     const { error: uploadError } = await supabase.storage.from('productos').upload(path, imagen)
     if (uploadError) {
       redirect('/admin/catalogo?error=' + encodeURIComponent('No se pudo subir la foto: ' + uploadError.message))
