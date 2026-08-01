@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { createOrder, createOrderFromFactura } from './actions'
+import { createOrder, createOrderFromFactura, duplicarUltimoPedido } from './actions'
 import ItemsForm from './ItemsForm'
 import { fmtDate, fmtMoney, statusClass, paymentStatus } from '@/lib/utils'
 import Link from 'next/link'
@@ -121,11 +121,26 @@ export default async function PedidosPage({
       <div className="card">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
           <h3 className="font-display text-lg">Pedidos registrados</h3>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Link href="/admin/pedidos?nuevo=factura" className="btn small ghost">+ Desde factura XML</Link>
             <Link href="/admin/pedidos?nuevo=1" className="btn small">+ Nuevo pedido</Link>
           </div>
         </div>
+
+        <form action={duplicarUltimoPedido} className="field flex flex-wrap gap-3 items-end mb-5 p-3 rounded" style={{ background: '#EFE6D6', border: '1px dashed #CBBFA4' }}>
+          <div style={{ minWidth: 220 }}>
+            <label>Repetir último pedido de</label>
+            <select name="clientId">
+              {clients?.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <button className="btn small ghost">Repetir pedido</button>
+          <div className="text-xs text-inksoft mb-1">
+            Copia los artículos de su pedido más reciente con fecha de hoy; después puedes ajustarlo.
+          </div>
+        </form>
 
         <form className="field flex flex-wrap gap-4 items-end mb-5" method="get">
           <div style={{ minWidth: 200 }}>
