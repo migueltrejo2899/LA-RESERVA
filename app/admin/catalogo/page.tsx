@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
 import { createProduct, updateProduct, deleteProduct, bulkImportProducts, bulkPublicar } from './actions'
 
-const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
+const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Pollo', 'Huevo', 'Chiles', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
 
 export default async function CatalogoPage({ searchParams }: { searchParams: { error?: string; ok?: string } }) {
   const supabase = createClient()
@@ -29,12 +29,12 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
             <input type="text" name="nombre" placeholder="ej. Arroz 1kg" />
           </div>
           <div>
-            <label>Unidad (opcional)</label>
-            <input type="text" name="unidad" placeholder="ej. caja, kg, pieza" />
+            <label>Precio por kilo (menudeo)</label>
+            <input type="number" step="0.01" name="precio_kilo" placeholder="0.00" />
           </div>
           <div>
-            <label>Precio de venta (opcional)</label>
-            <input type="number" step="0.01" name="precio" placeholder="0.00" />
+            <label>Precio por caja (mayoreo)</label>
+            <input type="number" step="0.01" name="precio_caja" placeholder="0.00" />
           </div>
           <div>
             <label>Categoría</label>
@@ -44,6 +44,10 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
             </select>
           </div>
           <div>
+            <label>Unidad (opcional)</label>
+            <input type="text" name="unidad" placeholder="ej. caja de 20 kg" />
+          </div>
+          <div className="col-span-2">
             <label>Descripción (opcional)</label>
             <input type="text" name="descripcion" placeholder="Notas del producto" />
           </div>
@@ -58,8 +62,8 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
         <h3 className="font-display text-lg mb-4">Importar SKUs desde otra plataforma (CSV)</h3>
         <p className="text-sm text-inksoft mb-3">
           El archivo debe tener encabezados: <span className="font-mono">sku, nombre</span> (obligatorios) y, si quieres,{' '}
-          <span className="font-mono">descripcion, unidad, precio, categoria</span>. La categoría debe decir exactamente:
-          Carne de Res, Carne de Cerdo, Frutas y Verduras, Lácteos o Bebidas. Si el SKU ya existe en el catálogo, se actualiza; si no, se crea.
+          <span className="font-mono">descripcion, unidad, categoria, precio_kilo, precio_caja</span>. La categoría debe decir exactamente:
+          Carne de Res, Carne de Cerdo, Pollo, Huevo, Chiles, Frutas y Verduras, Lácteos o Bebidas. Si el SKU ya existe en el catálogo, se actualiza; si no, se crea.
         </p>
         <form action={bulkImportProducts} className="field flex flex-wrap gap-3 items-end" encType="multipart/form-data">
           <input type="file" name="file" accept=".csv" />
@@ -99,7 +103,11 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                   </div>
                   <div className="flex items-center gap-3">
                     {p.publicado && <span className="stamp entregado">En el portal</span>}
-                    {p.precio != null && <span className="font-mono">{fmtMoney(p.precio)}</span>}
+                    <span className="font-mono text-sm">
+                      {p.precio_kilo != null && `${fmtMoney(p.precio_kilo)} /kg`}
+                      {p.precio_kilo != null && p.precio_caja != null && ' · '}
+                      {p.precio_caja != null && `${fmtMoney(p.precio_caja)} /caja`}
+                    </span>
                     <span className="text-xs font-mono text-crate underline">editar</span>
                   </div>
                 </summary>
@@ -108,8 +116,8 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                     <input type="hidden" name="id" value={p.id} />
                     <div><label>SKU</label><input type="text" name="sku" defaultValue={p.sku} /></div>
                     <div><label>Nombre</label><input type="text" name="nombre" defaultValue={p.nombre} /></div>
-                    <div><label>Unidad</label><input type="text" name="unidad" defaultValue={p.unidad || ''} /></div>
-                    <div><label>Precio de venta</label><input type="number" step="0.01" name="precio" defaultValue={p.precio ?? ''} /></div>
+                    <div><label>Precio por kilo (menudeo)</label><input type="number" step="0.01" name="precio_kilo" defaultValue={p.precio_kilo ?? ''} /></div>
+                    <div><label>Precio por caja (mayoreo)</label><input type="number" step="0.01" name="precio_caja" defaultValue={p.precio_caja ?? ''} /></div>
                     <div>
                       <label>Categoría</label>
                       <select name="categoria" defaultValue={p.categoria || ''}>
@@ -117,7 +125,8 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                         {CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </div>
-                    <div>
+                    <div><label>Unidad</label><input type="text" name="unidad" defaultValue={p.unidad || ''} /></div>
+                    <div className="col-span-2">
                       <label>Descripción</label>
                       <input type="text" name="descripcion" defaultValue={p.descripcion || ''} />
                     </div>
@@ -132,7 +141,7 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                       <input type="checkbox" name="publicado" defaultChecked={p.publicado} /> Publicado en el portal del cliente
                     </label>
                     <div className="col-span-2 text-xs text-inksoft">
-                      Para publicar, el producto necesita tener un precio de venta capturado.
+                      Para publicar, el producto necesita al menos un precio capturado (kilo o caja).
                     </div>
                     <button className="btn small w-fit col-span-2">Guardar cambios</button>
                   </form>
