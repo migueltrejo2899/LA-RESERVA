@@ -1,12 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
 import Link from 'next/link'
-import { setClientPrice } from './actions'
+import { setClientPrice, updatePreciosMasivos } from './actions'
 
 export default async function PreciosPorCliente({
   searchParams,
 }: {
-  searchParams: { cliente?: string; error?: string }
+  searchParams: { cliente?: string; error?: string; ok?: string }
 }) {
   const supabase = createClient()
 
@@ -29,6 +29,48 @@ export default async function PreciosPorCliente({
     <div className="space-y-5">
       <Link href="/admin/catalogo" className="text-crate underline text-sm font-mono">← Volver al catálogo</Link>
 
+      {searchParams.error && (
+        <div className="card" style={{ borderColor: '#C2492A' }}>
+          <p className="text-sm" style={{ color: '#C2492A' }}>{searchParams.error}</p>
+        </div>
+      )}
+      {searchParams.ok && (
+        <div className="card" style={{ borderColor: '#676F36' }}>
+          <p className="text-sm" style={{ color: '#676F36' }}>{searchParams.ok}</p>
+        </div>
+      )}
+
+      <div className="card">
+        <h3 className="font-display text-lg mb-2">Edición rápida de precios generales</h3>
+        <p className="text-sm text-inksoft mb-4">
+          Cambia los precios que necesites y guarda todos con un solo clic. Solo se actualizan los que
+          modificaste. Estos son los precios generales del catálogo (los que ven los clientes sin precio especial).
+        </p>
+
+        {(!products || products.length === 0) ? (
+          <p className="text-inksoft text-sm">No hay productos activos en el catálogo.</p>
+        ) : (
+          <form action={updatePreciosMasivos} className="field">
+            <div className="divide-y divide-line mb-4">
+              {products.map((p) => (
+                <div key={p.id} className="py-2 flex justify-between items-center gap-3 flex-wrap">
+                  <div>
+                    <div className="font-mono text-xs text-inksoft">{p.sku}{p.categoria ? ` · ${p.categoria}` : ''}</div>
+                    <div className="font-semibold text-sm">{p.nombre}</div>
+                  </div>
+                  <div style={{ width: 130 }}>
+                    <input type="hidden" name="productId" value={p.id} />
+                    <input type="hidden" name="precioOriginal" value={p.precio ?? ''} />
+                    <input type="number" step="0.01" name="precio" defaultValue={p.precio ?? ''} placeholder="—" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button className="btn">Guardar todos los cambios</button>
+          </form>
+        )}
+      </div>
+
       <div className="card">
         <h3 className="font-display text-lg mb-2">Precios especiales por cliente</h3>
         <p className="text-sm text-inksoft mb-4">
@@ -49,8 +91,6 @@ export default async function PreciosPorCliente({
           </div>
           <button className="btn small">Ver precios</button>
         </form>
-
-        {searchParams.error && <div className="text-stamp text-sm font-mono mt-3">{searchParams.error}</div>}
       </div>
 
       {clienteSel && (
