@@ -183,12 +183,22 @@ export async function bulkImportProducts(formData: FormData) {
   if (items.length === 0) {
     redirect('/admin/catalogo?error=' + encodeURIComponent('No se encontró ninguna fila válida (con SKU y nombre) en el CSV.'))
   }
-  const { error } = await supabase.from('products').upsert(items, { onConflict: 'sku' })
+  // si el archivo trae el mismo SKU en varias filas, nos quedamos con la última
+  const porSku = new Map(items.map((it) => [it.sku.toLowerCase(), it]))
+  const unicos = Array.from(porSku.values())
+  const duplicados = items.length - unicos.length
+  const { error } = await supabase.from('products').upsert(unicos, { onConflict: 'sku' })
   if (error) {
     redirect('/admin/catalogo?error=' + encodeURIComponent('Error al importar: ' + error.message))
   }
   revalidatePath('/admin/catalogo')
-  redirect('/admin/catalogo?ok=' + encodeURIComponent(`Se importaron/actualizaron ${items.length} productos.`))
+  redirect(
+    '/admin/catalogo?ok=' +
+      encodeURIComponent(
+        `Se importaron/actualizaron ${unicos.length} productos.` +
+          (duplicados > 0 ? ` (${duplicados} fila(s) traían SKU repetido; se usó la última de cada una.)` : '')
+      )
+  )
 }
 // Publica o despublica varios productos a la vez en el portal del cliente.
 // Al publicar, se omiten los que no tengan ningún precio capturado.
