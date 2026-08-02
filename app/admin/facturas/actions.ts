@@ -20,8 +20,7 @@ const parserOptions = {
 }
 
 // Revisa el XML sin asumir su tipo: dice si es un complemento de pago
-// (TipoDeComprobante "P") y de qué RFC es el receptor, para poder
-// decidir cómo procesarlo y a qué cliente asignarlo.
+// (TipoDeComprobante "P") y de qué RFC es el receptor.
 function inspeccionarXML(xmlText: string) {
   const parser = new XMLParser(parserOptions)
   const data = parser.parse(xmlText)
@@ -31,9 +30,8 @@ function inspeccionarXML(xmlText: string) {
   return { esComplemento: tipoComprobante === 'P', rfcReceptor }
 }
 
-// Clave de emparejado tolerante: quita la extensión, sufijos "(1)", acentos,
-// mayúsculas y cualquier símbolo, para que "Factura A-123 (1).pdf" y
-// "factura_a123.xml" se reconozcan como el mismo documento.
+// Clave de emparejado tolerante: sin extensión, sin "(1)", sin acentos,
+// sin mayúsculas y sin símbolos.
 function claveDe(nombre: string) {
   const dot = nombre.lastIndexOf('.')
   const base = dot > -1 ? nombre.slice(0, dot) : nombre
@@ -74,9 +72,8 @@ async function crearPedidoDesdeConceptos(
   return order.id
 }
 
-// Registra en la tabla de pagos el monto que trae el complemento de pago.
-// Si ya existe un pago de este mismo complemento (mismo folio fiscal en la
-// nota), NO lo vuelve a registrar — evita pagos duplicados.
+// Registra el pago del complemento. Si ya existe un pago de este mismo
+// complemento (mismo folio fiscal en la nota), NO lo duplica.
 async function registrarPagoDeComplemento(
   supabase: ReturnType<typeof createClient>,
   orderId: string,
@@ -106,13 +103,10 @@ async function registrarPagoDeComplemento(
   })
 }
 
-// Sube uno o varios pares de archivos (XML + PDF).
-// Cada factura se asigna al cliente cuyo RFC coincida con el receptor del XML,
-// y además se crea automáticamente su pedido con los artículos leídos del XML.
-// Cada complemento de pago se liga automáticamente a la factura que paga y
-// registra su pago en el pedido, con el monto que trae el XML.
-// La revisión de duplicados (por folio fiscal) se hace ANTES de crear
-// cualquier cosa, para que reintentar una carga no genere repetidos.
+// Sube pares de XML + PDF. Cada factura se asigna por RFC, crea su pedido,
+// y cada complemento se liga a su factura y registra su pago.
+// Si el documento ya estaba registrado pero SIN su PDF, y ahora viene el
+// PDF, se lo anexa al registro existente en vez de rechazarlo.
 export async function bulkUploadInvoices(formData: FormData): Promise<UploadResult[]> {
   const supabase = createClient()
   const files = formData.getAll('files') as File[]
@@ -122,7 +116,6 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
     return [{ fileName: '(sin archivos)', status: 'error', message: 'No se seleccionó ningún archivo.' }]
   }
 
-  // agrupar por clave tolerante para emparejar cada XML con su PDF
   const grupos = new Map<string, { xml?: File; pdf?: File }>()
   for (const f of validos) {
     const ext = f.name.toLowerCase().split('.').pop() || ''
@@ -132,8 +125,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
     grupos.set(claveDe(f.name), grupo)
   }
 
-  // red de seguridad: si en esta carga viene exactamente UN xml y UN pdf,
-  // son pareja aunque sus nombres no se parezcan en nada
+  // red de seguridad: si viene exactamente UN xml y UN pdf, son pareja
   const xmls = validos.filter((f) => f.name.toLowerCase().endsWith('.xml'))
   const pdfs = validos.filter((f) => f.name.toLowerCase().endsWith('.pdf'))
   if (xmls.length === 1 && pdfs.length === 1) {
@@ -211,13 +203,31 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
       // ===== 2. Revisar duplicados ANTES de crear cualquier cosa =====
       const { data: yaExiste } = await supabase
         .from('invoices')
-        .select('id')
+        .select('id, file_path, file_name, xml_path, client_id')
         .eq('folio_fiscal', folioFiscal)
         .limit(1)
         .maybeSingle()
 
       if (yaExiste) {
-        results.push({ fileName: xml.name, status: 'error', message: 'Ya estaba registrado (mismo folio fiscal). No se duplicó.' })
+        // si el registro existente solo tiene XML y ahora traemos el PDF,
+        // se lo anexamos en lugar de rechazarlo
+        const soloXml = !yaExiste.xml_path && yaExiste.file_name?.toLowerCase().endsWith('.xml')
+        if (soloXml && pdf) {
+          const pdfPath = `${yaExiste.client_id}/${Date.now()}-${pdf.name}`
+          await supabase.storage.from('facturas').upload(pdfPath, pdf)
+          await supabase
+            .from('invoices')
+            .update({
+              xml_path: yaExiste.file_path,
+              xml_name: yaExiste.file_name,
+              file_path: pdfPath,
+              file_name: pdf.name,
+            })
+            .eq('id', yaExiste.id)
+          results.push({ fileName: pdf.name, status: 'ok', clientName: clienteMatch.name, message: 'Se anexó el PDF al registro existente.' })
+        } else {
+          results.push({ fileName: xml.name, status: 'error', message: 'Ya estaba registrado (mismo folio fiscal). No se duplicó.' })
+        }
         continue
       }
 
@@ -301,9 +311,114 @@ export async function deleteInvoice(formData: FormData) {
   revalidatePath('/admin/facturas')
 }
 
-// Para facturas que ya estaban registradas ANTES de que existiera esta
-// función (subidas sin generar su pedido): lee su XML ya guardado en el
-// storage y crea el pedido retroactivamente.
+// Liga TODO lo pendiente de un jalón:
+// - facturas registradas sin pedido → les crea su pedido desde el XML guardado
+// - complementos sin pedido → los liga a su factura/pedido y registra su pago
+export async function reconciliarPendientes() {
+  const supabase = createClient()
+  let pedidosCreados = 0
+  let complementosLigados = 0
+  let sinResolver = 0
+
+  // 1) facturas sin pedido
+  const { data: facturasSinPedido } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('tipo', 'factura')
+    .is('order_id', null)
+
+  for (const inv of facturasSinPedido || []) {
+    const xmlPathToUse = inv.xml_path || (inv.file_name?.toLowerCase().endsWith('.xml') ? inv.file_path : null)
+    if (!xmlPathToUse) { sinResolver++; continue }
+    const { data: blob } = await supabase.storage.from('facturas').download(xmlPathToUse)
+    if (!blob) { sinResolver++; continue }
+    try {
+      const factura = parseFacturaXML(await blob.text())
+      if (!factura || factura.conceptos.length === 0) { sinResolver++; continue }
+      const orderId = await crearPedidoDesdeConceptos(
+        supabase,
+        inv.client_id,
+        factura.fecha,
+        factura.total || inv.monto || 0,
+        factura.conceptos,
+        'Pedido generado automáticamente desde una factura ya registrada'
+      )
+      if (orderId) {
+        await supabase.from('invoices').update({ order_id: orderId }).eq('id', inv.id)
+        pedidosCreados++
+      } else {
+        sinResolver++
+      }
+    } catch {
+      sinResolver++
+    }
+  }
+
+  // 2) complementos sin pedido
+  const { data: compsSinPedido } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('tipo', 'complemento_pago')
+    .is('order_id', null)
+
+  for (const inv of compsSinPedido || []) {
+    let facturaMatch: { id: string; order_id: string | null } | null = null
+
+    if (inv.factura_id) {
+      const { data } = await supabase.from('invoices').select('id, order_id').eq('id', inv.factura_id).maybeSingle()
+      facturaMatch = data
+    }
+
+    if (!facturaMatch || !facturaMatch.order_id) {
+      const xmlPathToUse = inv.xml_path || (inv.file_name?.toLowerCase().endsWith('.xml') ? inv.file_path : null)
+      if (xmlPathToUse) {
+        const { data: blob } = await supabase.storage.from('facturas').download(xmlPathToUse)
+        if (blob) {
+          try {
+            const comp = parseComplementoPagoXML(await blob.text())
+            const relacion = comp.pagosRelacionados[0]
+            if (relacion?.idDocumentoRelacionado) {
+              const { data } = await supabase
+                .from('invoices')
+                .select('id, order_id')
+                .eq('tipo', 'factura')
+                .eq('folio_fiscal', relacion.idDocumentoRelacionado)
+                .maybeSingle()
+              if (data) facturaMatch = data
+            }
+          } catch {
+            // sin XML legible no hay forma de ligarlo automáticamente
+          }
+        }
+      }
+    }
+
+    if (facturaMatch) {
+      await supabase
+        .from('invoices')
+        .update({ factura_id: facturaMatch.id, order_id: facturaMatch.order_id })
+        .eq('id', inv.id)
+      if (facturaMatch.order_id && inv.monto) {
+        await registrarPagoDeComplemento(supabase, facturaMatch.order_id, Number(inv.monto), inv.fecha, inv.folio_fiscal || '')
+      }
+      complementosLigados++
+    } else {
+      sinResolver++
+    }
+  }
+
+  revalidatePath('/admin/facturas')
+  revalidatePath('/admin/pedidos')
+  redirect(
+    '/admin/facturas?ok=' +
+      encodeURIComponent(
+        `Reconciliación: ${pedidosCreados} pedido(s) creados, ${complementosLigados} complemento(s) ligados` +
+          (sinResolver > 0 ? `, ${sinResolver} sin resolver (revísalos manualmente).` : '.')
+      )
+  )
+}
+
+// Para una factura individual: crea su pedido desde el XML guardado.
 export async function generarPedidoDesdeFactura(formData: FormData) {
   const supabase = createClient()
   const invoiceId = String(formData.get('invoiceId') || '')
@@ -360,11 +475,7 @@ export async function generarPedidoDesdeFactura(formData: FormData) {
   redirect(`/admin/pedidos/${orderId}`)
 }
 
-// Para complementos de pago ya registrados que se quedaron sin pedido
-// (por ejemplo, subidos antes de esta corrección): busca su factura
-// relacionada (por factura_id, o re-leyendo el XML guardado si hace falta)
-// y copia el pedido de esa factura al complemento. También registra el
-// pago si todavía no existía uno para este complemento.
+// Para un complemento individual: lo liga a su factura/pedido.
 export async function reLigarComplemento(formData: FormData) {
   const supabase = createClient()
   const invoiceId = String(formData.get('invoiceId') || '')
@@ -401,7 +512,7 @@ export async function reLigarComplemento(formData: FormData) {
             facturaMatch = data
           }
         } catch {
-          // si el XML no se puede leer, seguimos y reportamos abajo que no se encontró
+          // si el XML no se puede leer, seguimos y reportamos abajo
         }
       }
     }
@@ -425,10 +536,8 @@ export async function reLigarComplemento(formData: FormData) {
   redirect(facturaMatch!.order_id ? `/admin/pedidos/${facturaMatch!.order_id}` : '/admin/facturas')
 }
 
-// Recorre todas las facturas que ya tienen un pedido ligado y, si la fecha
-// de creación del pedido no coincide con la fecha de la factura, la corrige.
-// Sirve para arreglar en bloque pedidos viejos que se crearon con la fecha
-// de subida en vez de la fecha real de la factura.
+// Corrige en bloque la fecha de los pedidos para que coincida con la
+// fecha de su factura.
 export async function corregirFechasPedidos() {
   const supabase = createClient()
 
