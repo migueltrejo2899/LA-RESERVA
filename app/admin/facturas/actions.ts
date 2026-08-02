@@ -31,12 +31,18 @@ function inspeccionarXML(xmlText: string) {
   return { esComplemento: tipoComprobante === 'P', rfcReceptor }
 }
 
-// Quita sufijos tipo " (1)", "(2)", etc. que el sistema operativo o el
-// navegador agregan automáticamente cuando hay dos archivos con el mismo
-// nombre, para que el XML y el PDF de una misma factura se sigan
-// reconociendo como par aunque uno de los dos tenga ese sufijo.
-function normalizarBase(nombre: string) {
-  return nombre.replace(/\s*\(\d+\)\s*$/, '').trim()
+// Clave de emparejado tolerante: quita la extensión, sufijos "(1)", acentos,
+// mayúsculas y cualquier símbolo, para que "Factura A-123 (1).pdf" y
+// "factura_a123.xml" se reconozcan como el mismo documento.
+function claveDe(nombre: string) {
+  const dot = nombre.lastIndexOf('.')
+  const base = dot > -1 ? nombre.slice(0, dot) : nombre
+  return base
+    .replace(/\s*\(\d+\)\s*$/, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
 }
 
 async function crearPedidoDesdeConceptos(
@@ -100,7 +106,7 @@ async function registrarPagoDeComplemento(
   })
 }
 
-// Sube uno o varios pares de archivos (XML + PDF con el mismo nombre base).
+// Sube uno o varios pares de archivos (XML + PDF).
 // Cada factura se asigna al cliente cuyo RFC coincida con el receptor del XML,
 // y además se crea automáticamente su pedido con los artículos leídos del XML.
 // Cada complemento de pago se liga automáticamente a la factura que paga y
@@ -116,18 +122,23 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
     return [{ fileName: '(sin archivos)', status: 'error', message: 'No se seleccionó ningún archivo.' }]
   }
 
-  // agrupar por nombre base (sin extensión, sin sufijo "(N)") para emparejar
-  // XML con su PDF aunque uno de los dos traiga ese sufijo
+  // agrupar por clave tolerante para emparejar cada XML con su PDF
   const grupos = new Map<string, { xml?: File; pdf?: File }>()
   for (const f of validos) {
-    const dot = f.name.lastIndexOf('.')
-    const baseCruda = dot > -1 ? f.name.slice(0, dot) : f.name
-    const base = normalizarBase(baseCruda)
-    const ext = dot > -1 ? f.name.slice(dot + 1).toLowerCase() : ''
-    const grupo = grupos.get(base) || {}
+    const ext = f.name.toLowerCase().split('.').pop() || ''
+    const grupo = grupos.get(claveDe(f.name)) || {}
     if (ext === 'xml') grupo.xml = f
     else if (ext === 'pdf') grupo.pdf = f
-    grupos.set(base, grupo)
+    grupos.set(claveDe(f.name), grupo)
+  }
+
+  // red de seguridad: si en esta carga viene exactamente UN xml y UN pdf,
+  // son pareja aunque sus nombres no se parezcan en nada
+  const xmls = validos.filter((f) => f.name.toLowerCase().endsWith('.xml'))
+  const pdfs = validos.filter((f) => f.name.toLowerCase().endsWith('.pdf'))
+  if (xmls.length === 1 && pdfs.length === 1) {
+    grupos.clear()
+    grupos.set('par', { xml: xmls[0], pdf: pdfs[0] })
   }
 
   const { data: clients } = await supabase.from('profiles').select('id, name, rfc').eq('role', 'client')
@@ -136,7 +147,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
 
   for (const [base, { xml, pdf }] of grupos) {
     if (!xml) {
-      results.push({ fileName: base, status: 'error', message: 'Falta el archivo XML de este par.' })
+      results.push({ fileName: pdf?.name || base, status: 'error', message: 'Falta el archivo XML de este par.' })
       continue
     }
 
@@ -254,8 +265,6 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
       })
 
       if (insertError) {
-        // si el candado de la base de datos detectó un duplicado simultáneo,
-        // limpiamos los archivos que acabamos de subir y reportamos
         await supabase.storage.from('facturas').remove([xmlPath, ...(xmlPathCol ? [filePath] : [])])
         results.push({ fileName: xml.name, status: 'error', message: 'Ya estaba registrado (mismo folio fiscal). No se duplicó.' })
         continue
