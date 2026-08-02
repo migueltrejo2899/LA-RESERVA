@@ -1,23 +1,36 @@
 import { createClient } from '@/lib/supabase/server'
-import { fmtMoney } from '@/lib/utils'
+import { fmtDate, fmtMoney } from '@/lib/utils'
 import { createClientUser, updateClientPassword, updateClientInfo } from './actions'
+import Link from 'next/link'
 
 export default async function ClientesPage({ searchParams }: { searchParams: { error?: string } }) {
   const supabase = createClient()
-  const { data: clients } = await supabase
-    .from('profiles')
-    .select('id, username, name, contact, rfc, dias_credito')
-    .eq('role', 'client')
-    .order('name')
 
-  // saldo pendiente por cliente = suma de (total del pedido - pagos del pedido)
-  const { data: ordersData } = await supabase.from('orders').select('client_id, total, payments(monto)')
+  const [{ data: clients }, { data: ordersData }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, username, name, contact, rfc, dias_credito')
+      .eq('role', 'client')
+      .order('name'),
+    supabase.from('orders').select('id, folio, client_id, total, created_at, payments(monto)'),
+  ])
 
+  // saldo pendiente por cliente y lista de sus pedidos con saldo
   const saldoPorCliente = new Map<string, number>()
+  const pendientesPorCliente = new Map<string, { id: string; folio: string; created_at: string; saldo: number }[]>()
+
   for (const o of ordersData || []) {
-    const paid = (o.payments || []).reduce((s: number, p: any) => s + Number(p.monto), 0)
+    const paid = ((o as any).payments || []).reduce((s: number, p: any) => s + Number(p.monto), 0)
     const saldo = Number(o.total) - paid
     saldoPorCliente.set(o.client_id, (saldoPorCliente.get(o.client_id) || 0) + saldo)
+    if (saldo > 0) {
+      const lista = pendientesPorCliente.get(o.client_id) || []
+      lista.push({ id: o.id, folio: o.folio, created_at: o.created_at, saldo })
+      pendientesPorCliente.set(o.client_id, lista)
+    }
+  }
+  for (const lista of pendientesPorCliente.values()) {
+    lista.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
   }
 
   const totalPorCobrar = Array.from(saldoPorCliente.values()).reduce((s, v) => s + Math.max(0, v), 0)
@@ -67,6 +80,7 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
         <div className="divide-y divide-line">
           {clients?.map((c) => {
             const saldo = saldoPorCliente.get(c.id) || 0
+            const pendientes = pendientesPorCliente.get(c.id) || []
             return (
               <details key={c.id} className="py-3">
                 <summary className="cursor-pointer flex justify-between items-center flex-wrap gap-2">
@@ -76,14 +90,31 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
                   </div>
                   <div className="flex items-center gap-3">
                     {saldo > 0 ? (
-                      <span className="font-mono text-sm" style={{ color: '#C2492A' }}>Debe {fmtMoney(saldo)}</span>
+                      <span className="font-mono text-sm" style={{ color: '#C2492A' }}>
+                        Debe {fmtMoney(saldo)} · {pendientes.length} pedido{pendientes.length === 1 ? '' : 's'}
+                      </span>
                     ) : (
                       <span className="font-mono text-sm text-inksoft">Al corriente</span>
                     )}
-                    <span className="text-xs font-mono text-crate underline">editar</span>
+                    <span className="text-xs font-mono text-crate underline">ver</span>
                   </div>
                 </summary>
                 <div className="mt-3 space-y-3">
+                  {pendientes.length > 0 && (
+                    <div className="p-3 rounded" style={{ border: '1px solid #C2492A', background: '#FDFBF5' }}>
+                      <div className="font-subtitle text-xs uppercase tracking-widest mb-2" style={{ color: '#C2492A' }}>
+                        Pedidos por cobrar
+                      </div>
+                      <div className="divide-y divide-line">
+                        {pendientes.map((p) => (
+                          <Link key={p.id} href={`/admin/pedidos/${p.id}`} className="flex justify-between items-center py-2 gap-3 hover:bg-crate/5">
+                            <span className="font-mono text-xs text-inksoft">{p.folio} · {fmtDate(p.created_at)}</span>
+                            <span className="font-mono text-sm font-semibold" style={{ color: '#C2492A' }}>{fmtMoney(p.saldo)}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <form action={updateClientInfo} className="field grid grid-cols-4 gap-3 items-end">
                     <input type="hidden" name="clientId" value={c.id} />
                     <div><label>Nombre / razón social</label><input type="text" name="name" defaultValue={c.name} /></div>
