@@ -96,7 +96,7 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
                     ) : (
                       <span className="font-mono text-sm text-inksoft">Al corriente</span>
                     )}
-                    <span className="text-xs font-mono text-crate underline">ver</span>
+                    <span className="text-xs font-mono text-crate underline">ver / editar</span>
                   </div>
                 </summary>
                 <div className="mt-3 space-y-3">
@@ -117,10 +117,14 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
                   )}
                   <form action={updateClientInfo} className="field grid grid-cols-4 gap-3 items-end">
                     <input type="hidden" name="clientId" value={c.id} />
+                    <div><label>Usuario</label><input type="text" name="username" defaultValue={c.username} /></div>
                     <div><label>Nombre / razón social</label><input type="text" name="name" defaultValue={c.name} /></div>
                     <div><label>Contacto</label><input type="text" name="contact" defaultValue={c.contact || ''} /></div>
                     <div><label>RFC</label><input type="text" name="rfc" defaultValue={c.rfc || ''} placeholder="ej. XAXX010101000" /></div>
                     <div><label>Días de crédito</label><input type="number" name="dias_credito" defaultValue={c.dias_credito ?? 30} min={0} /></div>
+                    <div className="col-span-4 text-xs text-inksoft">
+                      Si cambias el usuario, el cliente deberá entrar con el usuario nuevo (su contraseña no cambia).
+                    </div>
                     <button className="btn small w-fit col-span-4">Guardar datos</button>
                   </form>
                   <form action={updateClientPassword} className="field flex gap-3 items-end">
