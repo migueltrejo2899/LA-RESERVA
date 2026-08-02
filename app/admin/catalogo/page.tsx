@@ -1,8 +1,17 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
 import { createProduct, updateProduct, deleteProduct, bulkImportProducts, bulkPublicar } from './actions'
+import Buscador from '../../portal/catalogo/Buscador'
 
 const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Pollo', 'Huevo', 'Chiles', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
+
+// texto en el que busca la barra: sku + nombre + descripción + categoría
+function claveBusqueda(p: any) {
+  return `${p.sku} ${p.nombre} ${p.descripcion || ''} ${p.categoria || ''}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
 
 export default async function CatalogoPage({ searchParams }: { searchParams: { error?: string; ok?: string } }) {
   const supabase = createClient()
@@ -13,6 +22,8 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
   }))
   return (
     <div className="space-y-5">
+      <Buscador />
+
       <div className="card">
         <h3 className="font-display text-lg mb-4">Agregar producto al catálogo</h3>
         {searchParams.error && <div className="text-stamp text-sm font-mono mb-4">{searchParams.error}</div>}
@@ -80,7 +91,7 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
         {withImg.length === 0 && <p className="text-inksoft text-sm">Aún no hay productos en el catálogo.</p>}
         <div className="divide-y divide-line">
           {withImg.map((p) => (
-            <div key={p.id} className="py-3 flex items-start gap-3">
+            <div key={p.id} className="py-3 flex items-start gap-3" data-buscar={claveBusqueda(p)}>
               <input type="checkbox" name="ids" value={p.id} form="bulk-form" className="mt-2" />
               <details className="flex-1">
                 <summary className="cursor-pointer flex justify-between items-center list-none flex-wrap gap-3">
