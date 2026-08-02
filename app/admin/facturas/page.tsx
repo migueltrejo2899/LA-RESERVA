@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtDate, fmtMoney } from '@/lib/utils'
 import UploadForm from './UploadForm'
 import DeleteButton from './DeleteButton'
-import { generarPedidoDesdeFactura, reLigarComplemento, corregirFechasPedidos } from './actions'
+import { generarPedidoDesdeFactura, reLigarComplemento, corregirFechasPedidos, reconciliarPendientes } from './actions'
 
 export default async function FacturasAdminPage({
   searchParams,
@@ -78,9 +78,14 @@ export default async function FacturasAdminPage({
             RFC, crea el pedido leyendo el XML, y liga cada complemento con su factura y su pedido.
           </p>
         </div>
-        <form action={corregirFechasPedidos}>
-          <button type="submit" className="btn ghost small">Corregir fechas de pedidos con factura</button>
-        </form>
+        <div className="flex gap-2 flex-wrap">
+          <form action={reconciliarPendientes}>
+            <button type="submit" className="btn small">Ligar pendientes</button>
+          </form>
+          <form action={corregirFechasPedidos}>
+            <button type="submit" className="btn ghost small">Corregir fechas</button>
+          </form>
+        </div>
       </div>
 
       {searchParams.error && (
@@ -174,14 +179,14 @@ export default async function FacturasAdminPage({
               const complementos = lista.filter((i: any) => i.tipo === 'complemento_pago' && i.factura_id === f.id)
               const vencida = estaVencida(f)
               return (
-                <div key={f.id} style={{ border: `1px solid ${vencida ? '#C2492A' : '#CBBFA4'}`, borderRadius: 6, padding: 14 }}>
+                <div key={f.id} style={{ border: `1px solid ${vencida ? '#C2492A' : '#CBBFA4'}`, borderRadius: 8, padding: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
                     <div>
-                      <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#676F36' }}>
+                      <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', color: '#676F36' }}>
                         Factura
                       </span>
                       {vencida && (
-                        <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#C2492A', borderColor: '#C2492A', marginLeft: 6 }}>
+                        <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', color: '#C2492A', borderColor: '#C2492A', marginLeft: 6 }}>
                           Vencida
                         </span>
                       )}
@@ -200,7 +205,7 @@ export default async function FacturasAdminPage({
                           <input type="hidden" name="invoiceId" value={f.id} />
                           <button
                             type="submit"
-                            style={{ fontSize: 11, fontWeight: 600, color: '#C2492A', border: '1px solid #C2492A', borderRadius: 3, padding: '3px 8px', background: 'transparent', cursor: 'pointer' }}
+                            style={{ fontSize: 11, fontWeight: 600, color: '#C2492A', border: '1px solid #C2492A', borderRadius: 4, padding: '3px 8px', background: 'transparent', cursor: 'pointer' }}
                           >
                             Generar pedido
                           </button>
@@ -224,7 +229,7 @@ export default async function FacturasAdminPage({
                       {complementos.map((c: any) => (
                         <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
                           <div>
-                            <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#A57F9B' }}>
+                            <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', color: '#A57F9B' }}>
                               Complemento
                             </span>
                             <div style={{ fontSize: 12, color: '#5B5C60', marginTop: 4 }}>
@@ -245,7 +250,7 @@ export default async function FacturasAdminPage({
             })}
 
             {sueltos.length > 0 && (
-              <div style={{ border: '1px solid #CBBFA4', borderRadius: 6, padding: 14 }}>
+              <div style={{ border: '1px solid #CBBFA4', borderRadius: 8, padding: 14 }}>
                 <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: '#5B5C60', marginBottom: 10 }}>
                   Complementos sin factura asociada
                 </div>
@@ -253,7 +258,7 @@ export default async function FacturasAdminPage({
                   {sueltos.map((c: any) => (
                     <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
                       <div>
-                        <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', transform: 'none', color: '#A57F9B' }}>
+                        <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', color: '#A57F9B' }}>
                           Complemento
                         </span>
                         <div style={{ fontWeight: 500, marginTop: 6 }}>{c.profiles?.name || '—'}</div>
@@ -269,7 +274,7 @@ export default async function FacturasAdminPage({
                             <input type="hidden" name="invoiceId" value={c.id} />
                             <button
                               type="submit"
-                              style={{ fontSize: 11, fontWeight: 600, color: '#A57F9B', border: '1px solid #A57F9B', borderRadius: 3, padding: '3px 8px', background: 'transparent', cursor: 'pointer' }}
+                              style={{ fontSize: 11, fontWeight: 600, color: '#A57F9B', border: '1px solid #A57F9B', borderRadius: 4, padding: '3px 8px', background: 'transparent', cursor: 'pointer' }}
                             >
                               Ligar a pedido
                             </button>
