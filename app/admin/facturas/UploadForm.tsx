@@ -4,10 +4,17 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { bulkUploadInvoices, type UploadResult } from './actions'
 
+// misma lógica tolerante que el servidor: sin extensión, sin "(1)",
+// sin acentos, sin mayúsculas y sin símbolos
 function baseDe(nombre: string) {
   const dot = nombre.lastIndexOf('.')
   const base = dot > -1 ? nombre.slice(0, dot) : nombre
-  return base.replace(/\s*\(\d+\)\s*$/, '').trim().toLowerCase()
+  return base
+    .replace(/\s*\(\d+\)\s*$/, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
 }
 
 function extDe(nombre: string) {
