@@ -49,13 +49,18 @@ export default async function FacturasAdminPage({
     return hoy > limite
   }
 
-  const totalFacturas = lista.filter((i: any) => i.tipo === 'factura').length
-  const totalComplementos = lista.filter((i: any) => i.tipo === 'complemento_pago').length
-  const montoTotal = lista.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
-
   const facturas = lista.filter((i: any) => i.tipo === 'factura')
-  const sueltos = lista.filter(
-    (i: any) => i.tipo === 'complemento_pago' && !facturas.some((f: any) => f.id === i.factura_id)
+  const complementosLista = lista.filter((i: any) => i.tipo === 'complemento_pago')
+
+  const totalFacturas = facturas.length
+  const totalComplementos = complementosLista.length
+  // monto facturado = SOLO la suma de las facturas (los complementos son
+  // pagos de esas mismas facturas; sumarlos contaría doble)
+  const montoFacturado = facturas.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
+  const montoPagado = complementosLista.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
+
+  const sueltos = complementosLista.filter(
+    (i: any) => !facturas.some((f: any) => f.id === i.factura_id)
   )
 
   const vencidas = facturas.filter(estaVencida)
@@ -114,9 +119,15 @@ export default async function FacturasAdminPage({
         </div>
         <div className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#2C2D31', fontFamily: 'var(--font-display)' }}>
-            {fmtMoney(montoTotal)}
+            {fmtMoney(montoFacturado)}
           </div>
-          <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Monto total</div>
+          <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Monto facturado</div>
+        </div>
+        <div className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#676F36', fontFamily: 'var(--font-display)' }}>
+            {fmtMoney(montoPagado)}
+          </div>
+          <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Pagado (complementos)</div>
         </div>
       </div>
 
