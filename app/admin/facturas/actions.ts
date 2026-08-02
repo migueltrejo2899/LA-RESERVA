@@ -68,9 +68,9 @@ async function crearPedidoDesdeConceptos(
   return order.id
 }
 
-// Registra en la tabla de pagos el monto que trae el complemento de pago,
-// para que el saldo del pedido se actualice solo, sin que el admin tenga
-// que capturarlo a mano.
+// Registra en la tabla de pagos el monto que trae el complemento de pago.
+// Si ya existe un pago de este mismo complemento (mismo folio fiscal en la
+// nota), NO lo vuelve a registrar — evita pagos duplicados.
 async function registrarPagoDeComplemento(
   supabase: ReturnType<typeof createClient>,
   orderId: string,
@@ -79,6 +79,18 @@ async function registrarPagoDeComplemento(
   folioFiscal: string
 ) {
   if (!monto || monto <= 0) return
+
+  if (folioFiscal) {
+    const { data: pagoExistente } = await supabase
+      .from('payments')
+      .select('id')
+      .eq('order_id', orderId)
+      .ilike('nota', `%${folioFiscal}%`)
+      .limit(1)
+      .maybeSingle()
+    if (pagoExistente) return
+  }
+
   await supabase.from('payments').insert({
     order_id: orderId,
     monto,
@@ -93,6 +105,8 @@ async function registrarPagoDeComplemento(
 // y además se crea automáticamente su pedido con los artículos leídos del XML.
 // Cada complemento de pago se liga automáticamente a la factura que paga y
 // registra su pago en el pedido, con el monto que trae el XML.
+// La revisión de duplicados (por folio fiscal) se hace ANTES de crear
+// cualquier cosa, para que reintentar una carga no genere repetidos.
 export async function bulkUploadInvoices(formData: FormData): Promise<UploadResult[]> {
   const supabase = createClient()
   const files = formData.getAll('files') as File[]
@@ -143,12 +157,14 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
         continue
       }
 
+      // ===== 1. Leer los datos del XML (sin tocar la base todavía) =====
       let tipo: 'factura' | 'complemento_pago' = 'factura'
       let fecha = ''
       let monto: number | null = null
       let folioFiscal = ''
       let facturaIdRelacionada: string | null = null
       let orderId: string | null = null
+      let facturaParseada: ReturnType<typeof parseFacturaXML> | null = null
 
       if (esComplemento) {
         const comp = parseComplementoPagoXML(xmlText)
@@ -166,25 +182,14 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
             .eq('folio_fiscal', relacion.idDocumentoRelacionado)
             .maybeSingle()
           facturaIdRelacionada = facturaRelacionada?.id || null
-          // el complemento hereda el pedido de la factura que paga
           orderId = facturaRelacionada?.order_id || null
         }
       } else {
-        const factura = parseFacturaXML(xmlText)
+        facturaParseada = parseFacturaXML(xmlText)
         tipo = 'factura'
-        fecha = factura.fecha
-        monto = factura.total
-        folioFiscal = factura.uuid
-
-        // crea automáticamente el pedido de esta factura, con sus artículos
-        orderId = await crearPedidoDesdeConceptos(
-          supabase,
-          clienteMatch.id,
-          factura.fecha,
-          factura.total,
-          factura.conceptos,
-          'Pedido creado automáticamente al subir la factura'
-        )
+        fecha = facturaParseada.fecha
+        monto = facturaParseada.total
+        folioFiscal = facturaParseada.uuid
       }
 
       if (!folioFiscal) {
@@ -192,15 +197,29 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
         continue
       }
 
+      // ===== 2. Revisar duplicados ANTES de crear cualquier cosa =====
       const { data: yaExiste } = await supabase
         .from('invoices')
         .select('id')
         .eq('folio_fiscal', folioFiscal)
+        .limit(1)
         .maybeSingle()
 
       if (yaExiste) {
-        results.push({ fileName: xml.name, status: 'error', message: 'Ya estaba registrado (mismo folio fiscal).' })
+        results.push({ fileName: xml.name, status: 'error', message: 'Ya estaba registrado (mismo folio fiscal). No se duplicó.' })
         continue
+      }
+
+      // ===== 3. Ahora sí: crear pedido (facturas), subir archivos, registrar =====
+      if (tipo === 'factura' && facturaParseada) {
+        orderId = await crearPedidoDesdeConceptos(
+          supabase,
+          clienteMatch.id,
+          facturaParseada.fecha,
+          facturaParseada.total,
+          facturaParseada.conceptos,
+          'Pedido creado automáticamente al subir la factura'
+        )
       }
 
       const xmlPath = `${clienteMatch.id}/${Date.now()}-${xml.name}`
@@ -220,7 +239,7 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
         xmlNameCol = xml.name
       }
 
-      await supabase.from('invoices').insert({
+      const { error: insertError } = await supabase.from('invoices').insert({
         client_id: clienteMatch.id,
         order_id: orderId,
         tipo,
@@ -234,8 +253,14 @@ export async function bulkUploadInvoices(formData: FormData): Promise<UploadResu
         factura_id: facturaIdRelacionada,
       })
 
-      // si es un complemento de pago y quedó ligado a un pedido, registramos
-      // el pago automáticamente con el monto que trae el XML
+      if (insertError) {
+        // si el candado de la base de datos detectó un duplicado simultáneo,
+        // limpiamos los archivos que acabamos de subir y reportamos
+        await supabase.storage.from('facturas').remove([xmlPath, ...(xmlPathCol ? [filePath] : [])])
+        results.push({ fileName: xml.name, status: 'error', message: 'Ya estaba registrado (mismo folio fiscal). No se duplicó.' })
+        continue
+      }
+
       if (tipo === 'complemento_pago' && orderId && monto) {
         await registrarPagoDeComplemento(supabase, orderId, monto, fecha, folioFiscal)
       }
@@ -382,19 +407,8 @@ export async function reLigarComplemento(formData: FormData) {
     .update({ factura_id: facturaMatch!.id, order_id: facturaMatch!.order_id })
     .eq('id', invoiceId)
 
-  // si el complemento ya quedó ligado a un pedido y todavía no se le había
-  // registrado su pago, lo registramos ahora con el monto guardado
   if (facturaMatch!.order_id && inv!.monto) {
-    const { data: pagoExistente } = await supabase
-      .from('payments')
-      .select('id')
-      .eq('order_id', facturaMatch!.order_id)
-      .ilike('nota', `%${inv!.folio_fiscal}%`)
-      .maybeSingle()
-
-    if (!pagoExistente) {
-      await registrarPagoDeComplemento(supabase, facturaMatch!.order_id, Number(inv!.monto), inv!.fecha, inv!.folio_fiscal || '')
-    }
+    await registrarPagoDeComplemento(supabase, facturaMatch!.order_id, Number(inv!.monto), inv!.fecha, inv!.folio_fiscal || '')
   }
 
   revalidatePath('/admin/facturas')
