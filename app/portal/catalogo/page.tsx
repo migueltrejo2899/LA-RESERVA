@@ -2,8 +2,18 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
 import Link from 'next/link'
 import { crearPedidoCliente } from './actions'
+import Buscador from './Buscador'
 
 const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Pollo', 'Huevo', 'Chiles', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
+
+// texto en el que busca la barra: sku + nombre + descripción + categoría,
+// sin acentos ni mayúsculas
+function claveBusqueda(p: any) {
+  return `${p.sku} ${p.nombre} ${p.descripcion || ''} ${p.categoria || ''}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
 
 export default async function PortalCatalogoPage({
   searchParams,
@@ -56,7 +66,7 @@ export default async function PortalCatalogoPage({
   if (otros.length > 0) grupos.push({ nombre: 'Otros', items: otros })
 
   const Producto = ({ p }: { p: any }) => (
-    <div className="border border-line rounded p-3">
+    <div className="border border-line rounded p-3" data-buscar={claveBusqueda(p)}>
       {p.imagenUrl ? (
         <img
           src={p.imagenUrl}
@@ -128,7 +138,7 @@ export default async function PortalCatalogoPage({
       ) : (
         <div className="space-y-6">
           {grupos.map((g) => (
-            <div key={g.nombre}>
+            <div key={g.nombre} data-grupo>
               <div className="font-subtitle text-xs uppercase tracking-widest text-inksoft border-b border-line pb-2 mb-3">
                 {g.nombre} ({g.items.length})
               </div>
@@ -143,61 +153,65 @@ export default async function PortalCatalogoPage({
   )
 
   return (
-    <div className="card">
-      <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
-        <h3 className="font-display text-lg">Catálogo de productos</h3>
-      </div>
+    <div>
+      <Buscador />
 
-      {searchParams.error && (
-        <div className="text-sm font-mono mb-4" style={{ color: '#C2492A' }}>{searchParams.error}</div>
-      )}
+      <div className="card">
+        <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+          <h3 className="font-display text-lg">Catálogo de productos</h3>
+        </div>
 
-      <div className="flex flex-wrap gap-2 mb-5">
-        <Link
-          href="/portal/catalogo"
-          className="btn small"
-          style={categoriaSel === '' ? {} : { background: 'transparent', color: '#676F36' }}
-        >
-          Todas
-        </Link>
-        {CATEGORIAS.map((cat) => (
+        {searchParams.error && (
+          <div className="text-sm font-mono mb-4" style={{ color: '#C2492A' }}>{searchParams.error}</div>
+        )}
+
+        <div className="flex flex-wrap gap-2 mb-5">
           <Link
-            key={cat}
-            href={`/portal/catalogo?categoria=${encodeURIComponent(cat)}`}
+            href="/portal/catalogo"
             className="btn small"
-            style={categoriaSel === cat ? {} : { background: 'transparent', color: '#676F36' }}
+            style={categoriaSel === '' ? {} : { background: 'transparent', color: '#676F36' }}
           >
-            {cat}
+            Todas
           </Link>
-        ))}
-        {hayOtros && (
-          <Link
-            href="/portal/catalogo?categoria=Otros"
-            className="btn small"
-            style={categoriaSel === 'Otros' ? {} : { background: 'transparent', color: '#676F36' }}
-          >
-            Otros
-          </Link>
+          {CATEGORIAS.map((cat) => (
+            <Link
+              key={cat}
+              href={`/portal/catalogo?categoria=${encodeURIComponent(cat)}`}
+              className="btn small"
+              style={categoriaSel === cat ? {} : { background: 'transparent', color: '#676F36' }}
+            >
+              {cat}
+            </Link>
+          ))}
+          {hayOtros && (
+            <Link
+              href="/portal/catalogo?categoria=Otros"
+              className="btn small"
+              style={categoriaSel === 'Otros' ? {} : { background: 'transparent', color: '#676F36' }}
+            >
+              Otros
+            </Link>
+          )}
+        </div>
+
+        {esPublico ? (
+          <Catalogo />
+        ) : (
+          <form action={crearPedidoCliente}>
+            <div className="mb-5 p-3 rounded text-sm text-inksoft" style={{ background: '#EFE6D6', border: '1px dashed #CBBFA4' }}>
+              Captura las cantidades que necesitas (kilos y/o cajas) en los productos que quieras y da
+              clic en <strong>Hacer pedido</strong>. Al enviarlo podrás descargar tu picking list para
+              verificar tu pedido cuando te llegue.
+            </div>
+            <Catalogo />
+            {todos.length > 0 && (
+              <div className="mt-6 pt-4 flex justify-end" style={{ borderTop: '2px solid #2C2D31' }}>
+                <button className="btn">Hacer pedido</button>
+              </div>
+            )}
+          </form>
         )}
       </div>
-
-      {esPublico ? (
-        <Catalogo />
-      ) : (
-        <form action={crearPedidoCliente}>
-          <div className="mb-5 p-3 rounded text-sm text-inksoft" style={{ background: '#EFE6D6', border: '1px dashed #CBBFA4' }}>
-            Captura las cantidades que necesitas (kilos y/o cajas) en los productos que quieras y da
-            clic en <strong>Hacer pedido</strong>. Al enviarlo podrás descargar tu picking list para
-            verificar tu pedido cuando te llegue.
-          </div>
-          <Catalogo />
-          {todos.length > 0 && (
-            <div className="mt-6 pt-4 flex justify-end" style={{ borderTop: '2px solid #2C2D31' }}>
-              <button className="btn">Hacer pedido</button>
-            </div>
-          )}
-        </form>
-      )}
     </div>
   )
 }
