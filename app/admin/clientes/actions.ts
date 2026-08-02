@@ -74,18 +74,41 @@ export async function updateClientPassword(formData: FormData) {
 
 export async function updateClientInfo(formData: FormData) {
   const clientId = String(formData.get('clientId') || '')
+  const usernameRaw = String(formData.get('username') || '').trim()
+  const username = usernameRaw
+    .toLowerCase()
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-9._-]/g, '')
   const name = String(formData.get('name') || '').trim()
   const contact = String(formData.get('contact') || '').trim()
   const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
   const diasCredito = Number(formData.get('dias_credito')) || 30
 
+  if (!username || !name) {
+    redirect('/admin/clientes?error=' + encodeURIComponent('El usuario y el nombre son obligatorios.'))
+  }
+
   const admin = createAdminClient()
+
+  // si el usuario cambió, hay que actualizar también su acceso (correo interno)
+  const { data: actual } = await admin.from('profiles').select('username').eq('id', clientId).single()
+  if (actual && actual.username !== username) {
+    const { error: authError } = await admin.auth.admin.updateUserById(clientId, {
+      email: usernameToEmail(username),
+      email_confirm: true,
+    })
+    if (authError) {
+      redirect('/admin/clientes?error=' + encodeURIComponent('No se pudo cambiar el usuario: ' + authError.message))
+    }
+  }
+
   const { error } = await admin
     .from('profiles')
-    .update({ name, contact, rfc: rfc || null, dias_credito: diasCredito })
+    .update({ username, name, contact, rfc: rfc || null, dias_credito: diasCredito })
     .eq('id', clientId)
   if (error) {
-    redirect('/admin/clientes?error=' + encodeURIComponent(error.message))
+    const msg = error.code === '23505' ? `El usuario "${username}" ya está ocupado por otro cliente.` : error.message
+    redirect('/admin/clientes?error=' + encodeURIComponent(msg))
   }
   revalidatePath('/admin/clientes')
   redirect('/admin/clientes')
