@@ -7,7 +7,7 @@ import { generarPedidoDesdeFactura, reLigarComplemento, corregirFechasPedidos, r
 export default async function FacturasAdminPage({
   searchParams,
 }: {
-  searchParams: { mes?: string; cliente?: string; tipo?: string; error?: string; ok?: string }
+  searchParams: { mes?: string; cliente?: string; tipo?: string; estado?: string; error?: string; ok?: string }
 }) {
   const supabase = createClient()
 
@@ -42,29 +42,46 @@ export default async function FacturasAdminPage({
   const facturasPagadas = new Set((todosComplementos || []).map((c: any) => c.factura_id).filter(Boolean))
 
   const hoy = new Date()
+  function estaPendiente(f: any) {
+    return f.tipo === 'factura' && !facturasPagadas.has(f.id)
+  }
   function estaVencida(f: any) {
-    if (f.tipo !== 'factura' || facturasPagadas.has(f.id)) return false
+    if (!estaPendiente(f)) return false
     const limite = new Date(f.fecha)
     limite.setDate(limite.getDate() + (f.profiles?.dias_credito ?? 30))
     return hoy > limite
   }
 
-  const facturas = lista.filter((i: any) => i.tipo === 'factura')
+  const todasFacturas = lista.filter((i: any) => i.tipo === 'factura')
   const complementosLista = lista.filter((i: any) => i.tipo === 'complemento_pago')
 
-  const totalFacturas = facturas.length
+  const totalFacturas = todasFacturas.length
   const totalComplementos = complementosLista.length
   // monto facturado = SOLO la suma de las facturas (los complementos son
   // pagos de esas mismas facturas; sumarlos contaría doble)
-  const montoFacturado = facturas.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
-  const montoPagado = complementosLista.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
+  const montoFacturado = todasFacturas.reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
 
-  const sueltos = complementosLista.filter(
-    (i: any) => !facturas.some((f: any) => f.id === i.factura_id)
-  )
-
-  const vencidas = facturas.filter(estaVencida)
+  const pendientes = todasFacturas.filter(estaPendiente)
+  const montoPendiente = pendientes.reduce((s: number, f: any) => s + Number(f.monto || 0), 0)
+  const vencidas = todasFacturas.filter(estaVencida)
   const montoVencido = vencidas.reduce((s: number, f: any) => s + Number(f.monto || 0), 0)
+
+  // filtro de estado de pago
+  const estado = searchParams.estado || ''
+  const facturas =
+    estado === 'pendientes'
+      ? pendientes
+      : estado === 'vencidas'
+        ? vencidas
+        : estado === 'pagadas'
+          ? todasFacturas.filter((f: any) => !estaPendiente(f))
+          : todasFacturas
+
+  const sueltos = estado
+    ? []
+    : complementosLista.filter((i: any) => !todasFacturas.some((f: any) => f.id === i.factura_id))
+
+  const clienteSel = clients?.find((c: any) => c.id === searchParams.cliente)
 
   const dl = (path: string) => `/descargar?path=${encodeURIComponent(path)}`
 
@@ -114,6 +131,14 @@ export default async function FacturasAdminPage({
           </div>
           <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Complementos</div>
         </div>
+        <div className="card" style={{ textAlign: 'center', padding: '16px 12px', borderColor: pendientes.length > 0 ? '#C2492A' : undefined }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#C2492A', fontFamily: 'var(--font-display)' }}>
+            {pendientes.length}
+          </div>
+          <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>
+            Pendientes de pago{pendientes.length > 0 ? ` · ${fmtMoney(montoPendiente)}` : ''}
+          </div>
+        </div>
         <div className="card" style={{ textAlign: 'center', padding: '16px 12px', borderColor: vencidas.length > 0 ? '#C2492A' : undefined }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#C2492A', fontFamily: 'var(--font-display)' }}>
             {vencidas.length}
@@ -127,12 +152,6 @@ export default async function FacturasAdminPage({
             {fmtMoney(montoFacturado)}
           </div>
           <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Monto facturado</div>
-        </div>
-        <div className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#676F36', fontFamily: 'var(--font-display)' }}>
-            {fmtMoney(montoPagado)}
-          </div>
-          <div className="text-sm" style={{ color: '#5B5C60', marginTop: 2 }}>Pagado (complementos)</div>
         </div>
       </div>
 
@@ -151,7 +170,16 @@ export default async function FacturasAdminPage({
               ))}
             </select>
           </div>
-          <div style={{ minWidth: 160 }}>
+          <div style={{ minWidth: 170 }}>
+            <label>Estado de pago</label>
+            <select name="estado" defaultValue={estado}>
+              <option value="">Todas</option>
+              <option value="pendientes">Pendientes de pago</option>
+              <option value="vencidas">Vencidas</option>
+              <option value="pagadas">Pagadas</option>
+            </select>
+          </div>
+          <div style={{ minWidth: 150 }}>
             <label>Tipo</label>
             <select name="tipo" defaultValue={searchParams.tipo || ''}>
               <option value="">Todos</option>
@@ -167,9 +195,20 @@ export default async function FacturasAdminPage({
       </div>
 
       <div className="card">
-        <h3 className="font-display" style={{ fontSize: 16, marginBottom: 16 }}>
-          Facturas registradas ({lista.length})
-        </h3>
+        <div className="flex justify-between items-center flex-wrap gap-2 mb-4">
+          <h3 className="font-display" style={{ fontSize: 16 }}>
+            {estado === 'pendientes' && 'Facturas pendientes de pago'}
+            {estado === 'vencidas' && 'Facturas vencidas'}
+            {estado === 'pagadas' && 'Facturas pagadas'}
+            {!estado && 'Facturas registradas'}
+            {clienteSel ? ` · ${clienteSel.name}` : ''} ({facturas.length})
+          </h3>
+          {(estado === 'pendientes' || estado === 'vencidas') && facturas.length > 0 && (
+            <span className="font-mono font-bold" style={{ color: '#C2492A' }}>
+              {fmtMoney(facturas.reduce((s: number, f: any) => s + Number(f.monto || 0), 0))}
+            </span>
+          )}
+        </div>
 
         {facturas.length === 0 && sueltos.length === 0 ? (
           <p className="text-sm" style={{ color: '#5B5C60' }}>No se encontraron facturas para los filtros seleccionados.</p>
@@ -178,6 +217,7 @@ export default async function FacturasAdminPage({
             {facturas.map((f: any) => {
               const complementos = lista.filter((i: any) => i.tipo === 'complemento_pago' && i.factura_id === f.id)
               const vencida = estaVencida(f)
+              const pendiente = estaPendiente(f)
               return (
                 <div key={f.id} style={{ border: `1px solid ${vencida ? '#C2492A' : '#CBBFA4'}`, borderRadius: 8, padding: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
@@ -185,9 +225,17 @@ export default async function FacturasAdminPage({
                       <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', color: '#676F36' }}>
                         Factura
                       </span>
-                      {vencida && (
+                      {vencida ? (
                         <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', color: '#C2492A', borderColor: '#C2492A', marginLeft: 6 }}>
                           Vencida
+                        </span>
+                      ) : pendiente ? (
+                        <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', color: '#C2492A', borderColor: '#C2492A', marginLeft: 6 }}>
+                          Pendiente de pago
+                        </span>
+                      ) : (
+                        <span className="stamp" style={{ fontSize: 10, padding: '4px 8px', color: '#676F36', marginLeft: 6 }}>
+                          Pagada
                         </span>
                       )}
                       <div style={{ fontWeight: 500, marginTop: 6 }}>{f.profiles?.name || '—'}</div>
