@@ -7,6 +7,11 @@ export default async function EstadoCuenta({ searchParams }: { searchParams: { d
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
+  const { data: perfilPublico } = await supabase.from('profiles').select('username').eq('id', user!.id).single()
+  if (perfilPublico?.username?.toLowerCase() === 'publico') {
+    return null
+  }
+
   let ordersQuery = supabase
     .from('orders')
     .select('id, folio, total, created_at')
@@ -96,8 +101,8 @@ export default async function EstadoCuenta({ searchParams }: { searchParams: { d
         <PrintButton />
       </div>
 
-      <div style={{ border: '2px solid #2C2D31', padding: 24, borderRadius: 4, background: '#FBF9F3' }}>
-        <div className="flex justify-between items-start border-b-[3px] border-ink pb-3 mb-4">
+      <div className="p-4 sm:p-6" style={{ border: '2px solid #2C2D31', borderRadius: 6, background: '#FBF9F3' }}>
+        <div className="flex justify-between items-start border-b-[3px] border-ink pb-3 mb-4 flex-wrap gap-2">
           <div>
             <div className="font-display text-xl">LA RESERVA</div>
             <div className="font-subtitle text-xs uppercase tracking-widest text-inksoft">Estado de cuenta</div>
@@ -116,56 +121,60 @@ export default async function EstadoCuenta({ searchParams }: { searchParams: { d
               </div>
               <div className="font-mono font-bold" style={{ color: '#C2492A' }}>{fmtMoney(totalVencido)}</div>
             </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs font-mono uppercase text-inksoft border-b border-line">
-                  <th className="text-left py-1">Fecha</th>
-                  <th className="text-left py-1">Factura</th>
-                  <th className="text-right py-1">Monto</th>
-                  <th className="text-right py-1">Días vencida</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vencidas.map((f) => (
-                  <tr key={f.id} className="border-b border-line">
-                    <td className="py-1">{fmtDate(f.fecha)}</td>
-                    <td className="py-1">{f.file_name}</td>
-                    <td className="py-1 text-right font-mono">{f.monto ? fmtMoney(f.monto) : '—'}</td>
-                    <td className="py-1 text-right font-mono font-semibold" style={{ color: '#C2492A' }}>{f.diasVencida}</td>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="w-full text-sm" style={{ minWidth: 420 }}>
+                <thead>
+                  <tr className="text-xs font-mono uppercase text-inksoft border-b border-line">
+                    <th className="text-left py-1">Fecha</th>
+                    <th className="text-left py-1">Factura</th>
+                    <th className="text-right py-1">Monto</th>
+                    <th className="text-right py-1">Días</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {vencidas.map((f) => (
+                    <tr key={f.id} className="border-b border-line">
+                      <td className="py-1" style={{ whiteSpace: 'nowrap' }}>{fmtDate(f.fecha)}</td>
+                      <td className="py-1" style={{ wordBreak: 'break-all', fontSize: 12 }}>{f.file_name}</td>
+                      <td className="py-1 text-right font-mono" style={{ whiteSpace: 'nowrap' }}>{f.monto ? fmtMoney(f.monto) : '—'}</td>
+                      <td className="py-1 text-right font-mono font-semibold" style={{ color: '#C2492A' }}>{f.diasVencida}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-xs font-mono uppercase text-inksoft border-b-2 border-ink">
-              <th className="text-left py-2">Fecha</th>
-              <th className="text-left py-2">Concepto</th>
-              <th className="text-right py-2">Cargo</th>
-              <th className="text-right py-2">Abono</th>
-              <th className="text-right py-2">Saldo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filas.map((f, i) => (
-              <tr key={i} className="border-b border-line">
-                <td className="py-2">{fmtDate(f.fecha)}</td>
-                <td className="py-2">{f.concepto}</td>
-                <td className="py-2 text-right font-mono">{f.cargo ? fmtMoney(f.cargo) : ''}</td>
-                <td className="py-2 text-right font-mono">{f.abono ? fmtMoney(f.abono) : ''}</td>
-                <td className="py-2 text-right font-mono font-semibold">{fmtMoney(f.saldo)}</td>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="w-full text-sm" style={{ minWidth: 480 }}>
+            <thead>
+              <tr className="text-xs font-mono uppercase text-inksoft border-b-2 border-ink">
+                <th className="text-left py-2">Fecha</th>
+                <th className="text-left py-2">Concepto</th>
+                <th className="text-right py-2">Cargo</th>
+                <th className="text-right py-2">Abono</th>
+                <th className="text-right py-2">Saldo</th>
               </tr>
-            ))}
-            {filas.length === 0 && (
-              <tr><td colSpan={5} className="text-inksoft py-3">No hay movimientos para el rango seleccionado.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filas.map((f, i) => (
+                <tr key={i} className="border-b border-line">
+                  <td className="py-2" style={{ whiteSpace: 'nowrap' }}>{fmtDate(f.fecha)}</td>
+                  <td className="py-2">{f.concepto}</td>
+                  <td className="py-2 text-right font-mono" style={{ whiteSpace: 'nowrap' }}>{f.cargo ? fmtMoney(f.cargo) : ''}</td>
+                  <td className="py-2 text-right font-mono" style={{ whiteSpace: 'nowrap' }}>{f.abono ? fmtMoney(f.abono) : ''}</td>
+                  <td className="py-2 text-right font-mono font-semibold" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(f.saldo)}</td>
+                </tr>
+              ))}
+              {filas.length === 0 && (
+                <tr><td colSpan={5} className="text-inksoft py-3">No hay movimientos para el rango seleccionado.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
-        <div className="grid grid-cols-3 gap-4 mt-4 pt-4 text-sm" style={{ borderTop: '1px solid #CBBFA4' }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 mt-4 pt-4 text-sm" style={{ borderTop: '1px solid #CBBFA4' }}>
           <div><span className="text-inksoft">Total cargos: </span><span className="font-mono font-semibold">{fmtMoney(totalCargos)}</span></div>
           <div><span className="text-inksoft">Total abonos: </span><span className="font-mono font-semibold">{fmtMoney(totalAbonos)}</span></div>
           <div><span className="text-inksoft">Saldo actual: </span><span className="font-mono font-bold">{fmtMoney(saldo)}</span></div>
