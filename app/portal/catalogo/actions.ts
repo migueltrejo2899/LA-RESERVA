@@ -62,13 +62,13 @@ export async function crearPedidoCliente(formData: FormData) {
     .filter((s) => s.kilos > 0 || s.cajas > 0)
 
   if (seleccion.length === 0) {
-    redirect('/portal/catalogo?error=' + encodeURIComponent('Captura al menos una cantidad (kilos o cajas) para hacer tu pedido.'))
+    redirect('/portal/catalogo?error=' + encodeURIComponent('Captura al menos una cantidad para hacer tu pedido.'))
   }
 
   const [{ data: products }, { data: precios }] = await Promise.all([
     supabase
       .from('products')
-      .select('id, nombre, precio_kilo, precio_caja')
+      .select('id, nombre, precio_kilo, precio_caja, unidad_menudeo')
       .eq('publicado', true)
       .eq('activo', true)
       .in('id', seleccion.map((s) => s.id)),
@@ -82,10 +82,11 @@ export async function crearPedidoCliente(formData: FormData) {
     const p = products?.find((x) => x.id === s.id)
     if (!p) continue
     const esp = especialDe.get(p.id)
-    const precioKilo = esp?.precio_kilo ?? p.precio_kilo
+    const precioMenudeo = esp?.precio_kilo ?? p.precio_kilo
     const precioCaja = esp?.precio_caja ?? p.precio_caja
-    if (s.kilos > 0 && precioKilo != null) {
-      items.push({ producto: `${p.nombre} (kilo)`, cantidad: s.kilos, precio: Number(precioKilo) })
+    const unidadMenudeo = p.unidad_menudeo === 'litro' ? 'litro' : 'kilo'
+    if (s.kilos > 0 && precioMenudeo != null) {
+      items.push({ producto: `${p.nombre} (${unidadMenudeo})`, cantidad: s.kilos, precio: Number(precioMenudeo) })
     }
     if (s.cajas > 0 && precioCaja != null) {
       items.push({ producto: `${p.nombre} (caja)`, cantidad: s.cajas, precio: Number(precioCaja) })
