@@ -1,9 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
-import { createProduct, updateProduct, deleteProduct, bulkImportProducts, bulkPublicar } from './actions'
+import { createProduct, updateProduct, deleteProduct, bulkImportProducts, bulkPublicar, createCategoria, deleteCategoria } from './actions'
 import Buscador from '../../portal/catalogo/Buscador'
-
-const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Pollo', 'Huevo', 'Chiles', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
 
 // texto en el que busca la barra: sku + nombre + descripción + categoría
 function claveBusqueda(p: any) {
@@ -13,23 +11,79 @@ function claveBusqueda(p: any) {
     .replace(/[\u0300-\u036f]/g, '')
 }
 
-export default async function CatalogoPage({ searchParams }: { searchParams: { error?: string; ok?: string } }) {
+export default async function CatalogoPage({
+  searchParams,
+}: {
+  searchParams: { error?: string; ok?: string; categoria?: string }
+}) {
   const supabase = createClient()
-  const { data: products } = await supabase.from('products').select('*').order('nombre')
-  const withImg = (products || []).map((p) => ({
-    ...p,
-    imagenUrl: p.imagen_path ? supabase.storage.from('productos').getPublicUrl(p.imagen_path).data.publicUrl : null,
-  }))
+
+  const [{ data: products }, { data: categorias }] = await Promise.all([
+    supabase.from('products').select('*').order('nombre'),
+    supabase.from('categorias').select('id, nombre').order('nombre'),
+  ])
+
+  const CATEGORIAS = (categorias || []).map((c) => c.nombre)
+  const categoriaSel = searchParams.categoria || ''
+
+  const withImg = (products || [])
+    .filter((p) =>
+      !categoriaSel
+        ? true
+        : categoriaSel === 'Otros'
+          ? !p.categoria || !CATEGORIAS.includes(p.categoria)
+          : p.categoria === categoriaSel
+    )
+    .map((p) => ({
+      ...p,
+      imagenUrl: p.imagen_path ? supabase.storage.from('productos').getPublicUrl(p.imagen_path).data.publicUrl : null,
+    }))
+
+  const etiquetaMenudeo = (p: any) => (p.unidad_menudeo === 'litro' ? '/L' : '/kg')
+
   return (
     <div className="space-y-5">
       <Buscador />
 
+      {searchParams.error && (
+        <div className="card" style={{ borderColor: '#C2492A' }}>
+          <p className="text-sm" style={{ color: '#C2492A' }}>{searchParams.error}</p>
+        </div>
+      )}
+      {searchParams.ok && (
+        <div className="card" style={{ borderColor: '#676F36' }}>
+          <p className="text-sm" style={{ color: '#676F36' }}>{searchParams.ok}</p>
+        </div>
+      )}
+
+      <div className="card">
+        <h3 className="font-display text-lg mb-2">Categorías</h3>
+        <p className="text-sm text-inksoft mb-3">
+          Estas son las categorías del catálogo (se usan aquí y en el portal del cliente). Si eliminas
+          una, sus productos quedan "sin categoría" — no se borran.
+        </p>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {(categorias || []).map((c) => (
+            <form key={c.id} action={deleteCategoria} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm" style={{ border: '1px solid #CBBFA4', background: '#F7F2E7' }}>
+              <input type="hidden" name="id" value={c.id} />
+              <input type="hidden" name="nombre" value={c.nombre} />
+              {c.nombre}
+              <button type="submit" title="Eliminar categoría" style={{ color: '#C2492A', fontWeight: 700, marginLeft: 4, cursor: 'pointer' }}>×</button>
+            </form>
+          ))}
+          {(!categorias || categorias.length === 0) && <span className="text-sm text-inksoft">Aún no hay categorías.</span>}
+        </div>
+        <form action={createCategoria} className="field flex gap-3 items-end flex-wrap">
+          <div style={{ minWidth: 220 }}>
+            <label>Nueva categoría</label>
+            <input type="text" name="nombre" placeholder="ej. Mariscos" />
+          </div>
+          <button className="btn small">Agregar categoría</button>
+        </form>
+      </div>
+
       <div className="card">
         <h3 className="font-display text-lg mb-4">Agregar producto al catálogo</h3>
-        {searchParams.error && <div className="text-stamp text-sm font-mono mb-4">{searchParams.error}</div>}
-        {searchParams.ok && (
-          <div className="text-sm font-mono mb-4" style={{ color: '#676F36' }}>{searchParams.ok}</div>
-        )}
         <form action={createProduct} className="field grid grid-cols-2 gap-4 items-end" encType="multipart/form-data">
           <div>
             <label>SKU</label>
@@ -40,8 +94,15 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
             <input type="text" name="nombre" placeholder="ej. Arroz 1kg" />
           </div>
           <div>
-            <label>Precio por kilo (menudeo)</label>
+            <label>Precio menudeo</label>
             <input type="number" step="0.01" name="precio_kilo" placeholder="0.00" />
+          </div>
+          <div>
+            <label>El menudeo se vende por</label>
+            <select name="unidad_menudeo" defaultValue="kilo">
+              <option value="kilo">Kilo</option>
+              <option value="litro">Litro</option>
+            </select>
           </div>
           <div>
             <label>Precio por caja (mayoreo)</label>
@@ -58,7 +119,7 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
             <label>Unidad (opcional)</label>
             <input type="text" name="unidad" placeholder="ej. caja de 20 kg" />
           </div>
-          <div className="col-span-2">
+          <div>
             <label>Descripción (opcional)</label>
             <input type="text" name="descripcion" placeholder="Notas del producto" />
           </div>
@@ -69,26 +130,49 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
           <button className="btn small col-span-2 w-fit">Agregar producto</button>
         </form>
       </div>
+
       <div className="card">
         <h3 className="font-display text-lg mb-4">Importar SKUs desde otra plataforma (CSV)</h3>
         <p className="text-sm text-inksoft mb-3">
           El archivo debe tener encabezados: <span className="font-mono">sku, nombre</span> (obligatorios) y, si quieres,{' '}
-          <span className="font-mono">descripcion, unidad, categoria, precio_kilo, precio_caja</span>. La categoría debe decir exactamente:
-          Carne de Res, Carne de Cerdo, Pollo, Huevo, Chiles, Frutas y Verduras, Lácteos o Bebidas. Si el SKU ya existe en el catálogo, se actualiza; si no, se crea.
+          <span className="font-mono">descripcion, unidad, categoria, unidad_menudeo, precio_kilo, precio_caja</span>.
+          La categoría debe coincidir con una de tus categorías; unidad_menudeo puede ser "kilo" o "litro".
+          Si el SKU ya existe en el catálogo, se actualiza; si no, se crea.
         </p>
         <form action={bulkImportProducts} className="field flex flex-wrap gap-3 items-end" encType="multipart/form-data">
           <input type="file" name="file" accept=".csv" />
           <button className="btn small">Importar CSV</button>
         </form>
       </div>
+
       <form id="bulk-form" action={bulkPublicar} className="card flex flex-wrap gap-3 items-center">
         <span className="text-xs text-inksoft">Con los productos marcados abajo (casilla a la izquierda de cada uno):</span>
         <button className="btn small" name="modo" value="publicar">Publicar en el portal del cliente</button>
         <button className="btn ghost small" name="modo" value="despublicar">Quitar del portal</button>
       </form>
+
       <div className="card">
-        <h3 className="font-display text-lg mb-4">Catálogo ({withImg.length})</h3>
-        {withImg.length === 0 && <p className="text-inksoft text-sm">Aún no hay productos en el catálogo.</p>}
+        <div className="flex justify-between items-center flex-wrap gap-3 mb-4">
+          <h3 className="font-display text-lg">
+            Catálogo ({withImg.length}){categoriaSel ? ` · ${categoriaSel}` : ''}
+          </h3>
+          <form className="field flex gap-2 items-end" method="get">
+            <div style={{ minWidth: 180 }}>
+              <label>Filtrar por categoría</label>
+              <select name="categoria" defaultValue={categoriaSel}>
+                <option value="">Todas</option>
+                {CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="Otros">Sin categoría</option>
+              </select>
+            </div>
+            <button className="btn small">Filtrar</button>
+            {categoriaSel && (
+              <a href="/admin/catalogo" className="text-sm font-mono text-crate underline mb-1">limpiar</a>
+            )}
+          </form>
+        </div>
+
+        {withImg.length === 0 && <p className="text-inksoft text-sm">No hay productos para este filtro.</p>}
         <div className="divide-y divide-line">
           {withImg.map((p) => (
             <div key={p.id} className="py-3 flex items-start gap-3" data-buscar={claveBusqueda(p)}>
@@ -115,7 +199,7 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                   <div className="flex items-center gap-3">
                     {p.publicado && <span className="stamp entregado">En el portal</span>}
                     <span className="font-mono text-sm">
-                      {p.precio_kilo != null && `${fmtMoney(p.precio_kilo)} /kg`}
+                      {p.precio_kilo != null && `${fmtMoney(p.precio_kilo)} ${etiquetaMenudeo(p)}`}
                       {p.precio_kilo != null && p.precio_caja != null && ' · '}
                       {p.precio_caja != null && `${fmtMoney(p.precio_caja)} /caja`}
                     </span>
@@ -127,7 +211,14 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                     <input type="hidden" name="id" value={p.id} />
                     <div><label>SKU</label><input type="text" name="sku" defaultValue={p.sku} /></div>
                     <div><label>Nombre</label><input type="text" name="nombre" defaultValue={p.nombre} /></div>
-                    <div><label>Precio por kilo (menudeo)</label><input type="number" step="0.01" name="precio_kilo" defaultValue={p.precio_kilo ?? ''} /></div>
+                    <div><label>Precio menudeo</label><input type="number" step="0.01" name="precio_kilo" defaultValue={p.precio_kilo ?? ''} /></div>
+                    <div>
+                      <label>El menudeo se vende por</label>
+                      <select name="unidad_menudeo" defaultValue={p.unidad_menudeo || 'kilo'}>
+                        <option value="kilo">Kilo</option>
+                        <option value="litro">Litro</option>
+                      </select>
+                    </div>
                     <div><label>Precio por caja (mayoreo)</label><input type="number" step="0.01" name="precio_caja" defaultValue={p.precio_caja ?? ''} /></div>
                     <div>
                       <label>Categoría</label>
@@ -137,7 +228,7 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                       </select>
                     </div>
                     <div><label>Unidad</label><input type="text" name="unidad" defaultValue={p.unidad || ''} /></div>
-                    <div className="col-span-2">
+                    <div>
                       <label>Descripción</label>
                       <input type="text" name="descripcion" defaultValue={p.descripcion || ''} />
                     </div>
@@ -152,7 +243,7 @@ export default async function CatalogoPage({ searchParams }: { searchParams: { e
                       <input type="checkbox" name="publicado" defaultChecked={p.publicado} /> Publicado en el portal del cliente
                     </label>
                     <div className="col-span-2 text-xs text-inksoft">
-                      Para publicar, el producto necesita al menos un precio capturado (kilo o caja).
+                      Para publicar, el producto necesita al menos un precio capturado (menudeo o caja).
                     </div>
                     <button className="btn small w-fit col-span-2">Guardar cambios</button>
                   </form>
