@@ -4,10 +4,7 @@ import Link from 'next/link'
 import { crearPedidoCliente } from './actions'
 import Buscador from './Buscador'
 
-const CATEGORIAS = ['Carne de Res', 'Carne de Cerdo', 'Pollo', 'Huevo', 'Chiles', 'Frutas y Verduras', 'Lácteos', 'Bebidas']
-
-// texto en el que busca la barra: sku + nombre + descripción + categoría,
-// sin acentos ni mayúsculas
+// texto en el que busca la barra: sku + nombre + descripción + categoría
 function claveBusqueda(p: any) {
   return `${p.sku} ${p.nombre} ${p.descripcion || ''} ${p.categoria || ''}`
     .toLowerCase()
@@ -23,7 +20,7 @@ export default async function PortalCatalogoPage({
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: profile }, { data: products }, { data: precios }] = await Promise.all([
+  const [{ data: profile }, { data: products }, { data: precios }, { data: categoriasData }] = await Promise.all([
     supabase.from('profiles').select('username').eq('id', user!.id).single(),
     supabase
       .from('products')
@@ -32,8 +29,10 @@ export default async function PortalCatalogoPage({
       .eq('activo', true)
       .order('nombre'),
     supabase.from('client_prices').select('product_id, precio_kilo, precio_caja').eq('client_id', user!.id),
+    supabase.from('categorias').select('nombre').order('nombre'),
   ])
 
+  const CATEGORIAS = (categoriasData || []).map((c) => c.nombre)
   const esPublico = profile?.username?.toLowerCase() === 'publico'
   const especialDe = new Map((precios || []).map((p) => [p.product_id, p]))
 
@@ -44,6 +43,7 @@ export default async function PortalCatalogoPage({
       imagenUrl: p.imagen_path ? supabase.storage.from('productos').getPublicUrl(p.imagen_path).data.publicUrl : null,
       kilo: esp?.precio_kilo ?? p.precio_kilo,
       caja: esp?.precio_caja ?? p.precio_caja,
+      esLitro: p.unidad_menudeo === 'litro',
       tieneEspecial: esp != null && (esp.precio_kilo != null || esp.precio_caja != null),
     }
   })
@@ -82,7 +82,7 @@ export default async function PortalCatalogoPage({
       <div className="mt-2">
         {p.kilo != null && (
           <div className="flex justify-between items-center">
-            <span className="text-xs text-inksoft">Kilo (menudeo)</span>
+            <span className="text-xs text-inksoft">{p.esLitro ? 'Litro' : 'Kilo'} (menudeo)</span>
             <span className="font-mono font-bold">{fmtMoney(p.kilo)}</span>
           </div>
         )}
@@ -101,7 +101,7 @@ export default async function PortalCatalogoPage({
           <input type="hidden" name="productId" value={p.id} />
           {p.kilo != null ? (
             <div>
-              <label>Kilos</label>
+              <label>{p.esLitro ? 'Litros' : 'Kilos'}</label>
               <input type="number" step="0.01" min="0" name="kilos" placeholder="0" />
             </div>
           ) : (
@@ -199,7 +199,7 @@ export default async function PortalCatalogoPage({
         ) : (
           <form action={crearPedidoCliente}>
             <div className="mb-5 p-3 rounded text-sm text-inksoft" style={{ background: '#EFE6D6', border: '1px dashed #CBBFA4' }}>
-              Captura las cantidades que necesitas (kilos y/o cajas) en los productos que quieras y da
+              Captura las cantidades que necesitas en los productos que quieras y da
               clic en <strong>Hacer pedido</strong>. Al enviarlo podrás descargar tu picking list para
               verificar tu pedido cuando te llegue.
             </div>
