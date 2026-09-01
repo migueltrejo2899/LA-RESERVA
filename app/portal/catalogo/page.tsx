@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
+import { fmtDescuento, normalizarDescuento, preciosDeCliente } from '@/lib/precios'
 import Link from 'next/link'
 import { crearPedidoCliente } from './actions'
 import Buscador from './Buscador'
@@ -21,7 +22,7 @@ export default async function PortalCatalogoPage({
   const { data: { user } } = await supabase.auth.getUser()
 
   const [{ data: profile }, { data: products }, { data: precios }, { data: categoriasData }] = await Promise.all([
-    supabase.from('profiles').select('username').eq('id', user!.id).single(),
+    supabase.from('profiles').select('username, descuento').eq('id', user!.id).single(),
     supabase
       .from('products')
       .select('*')
@@ -34,17 +35,21 @@ export default async function PortalCatalogoPage({
 
   const CATEGORIAS = (categoriasData || []).map((c) => c.nombre)
   const esPublico = profile?.username?.toLowerCase() === 'publico'
+  const descuento = esPublico ? 0 : normalizarDescuento(profile?.descuento)
   const especialDe = new Map((precios || []).map((p) => [p.product_id, p]))
 
   const todos = (products || []).map((p) => {
-    const esp = especialDe.get(p.id)
+    const pr = preciosDeCliente(p, especialDe.get(p.id), descuento)
     return {
       ...p,
       imagenUrl: p.imagen_path ? supabase.storage.from('productos').getPublicUrl(p.imagen_path).data.publicUrl : null,
-      kilo: esp?.precio_kilo ?? p.precio_kilo,
-      caja: esp?.precio_caja ?? p.precio_caja,
+      kilo: pr.kilo,
+      caja: pr.caja,
+      kiloLista: pr.kiloLista,
+      cajaLista: pr.cajaLista,
       esLitro: p.unidad_menudeo === 'litro',
-      tieneEspecial: esp != null && (esp.precio_kilo != null || esp.precio_caja != null),
+      tieneEspecial: pr.tieneEspecial,
+      tieneDescuento: pr.tieneDescuento,
     }
   })
 
@@ -83,17 +88,36 @@ export default async function PortalCatalogoPage({
         {p.kilo != null && (
           <div className="flex justify-between items-center">
             <span className="text-xs text-inksoft">{p.esLitro ? 'Litro' : 'Kilo'} (menudeo)</span>
-            <span className="font-mono font-bold">{fmtMoney(p.kilo)}</span>
+            <span className="font-mono font-bold">
+              {p.kiloLista != null && (
+                <span className="text-xs text-inksoft font-normal mr-1" style={{ textDecoration: 'line-through' }}>
+                  {fmtMoney(p.kiloLista)}
+                </span>
+              )}
+              {fmtMoney(p.kilo)}
+            </span>
           </div>
         )}
         {p.caja != null && (
           <div className="flex justify-between items-center">
             <span className="text-xs text-inksoft">Caja (mayoreo)</span>
-            <span className="font-mono font-bold">{fmtMoney(p.caja)}</span>
+            <span className="font-mono font-bold">
+              {p.cajaLista != null && (
+                <span className="text-xs text-inksoft font-normal mr-1" style={{ textDecoration: 'line-through' }}>
+                  {fmtMoney(p.cajaLista)}
+                </span>
+              )}
+              {fmtMoney(p.caja)}
+            </span>
           </div>
         )}
         {p.tieneEspecial && (
           <div className="text-xs text-right" style={{ color: '#676F36' }}>tu precio especial</div>
+        )}
+        {p.tieneDescuento && (
+          <div className="text-xs text-right" style={{ color: '#676F36' }}>
+            incluye tu descuento del {fmtDescuento(descuento)}
+          </div>
         )}
       </div>
       {!esPublico && (
@@ -159,7 +183,19 @@ export default async function PortalCatalogoPage({
       <div className="card">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
           <h3 className="font-display text-lg">Catálogo de productos</h3>
+          {todos.length > 0 && (
+            <a href="/portal/catalogo/pdf" className="btn small no-print" download>
+              Descargar catálogo (PDF)
+            </a>
+          )}
         </div>
+
+        {descuento > 0 && (
+          <div className="mb-4 p-3 rounded text-sm" style={{ background: '#EFF0E4', border: '1px dashed #676F36', color: '#3F4522' }}>
+            Tienes un <strong>descuento del {fmtDescuento(descuento)}</strong> sobre los precios de lista.
+            Los precios que ves abajo y en el PDF ya lo incluyen.
+          </div>
+        )}
 
         {searchParams.error && (
           <div className="text-sm font-mono mb-4" style={{ color: '#C2492A' }}>{searchParams.error}</div>
