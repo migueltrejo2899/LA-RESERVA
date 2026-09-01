@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
+import { fmtDescuento } from '@/lib/precios'
 import Link from 'next/link'
 import { setClientPrice, updatePreciosMasivos } from './actions'
 
@@ -11,7 +12,7 @@ export default async function PreciosPorCliente({
   const supabase = createClient()
 
   const [{ data: clients }, { data: products }] = await Promise.all([
-    supabase.from('profiles').select('id, name, username').eq('role', 'client').order('name'),
+    supabase.from('profiles').select('id, name, username, descuento').eq('role', 'client').order('name'),
     supabase.from('products').select('*').eq('activo', true).order('nombre'),
   ])
 
@@ -107,7 +108,27 @@ export default async function PreciosPorCliente({
 
       {clienteSel && (
         <div className="card">
-          <h3 className="font-display text-lg mb-4">Precios para {clienteSel.name}</h3>
+          <div className="flex justify-between items-center flex-wrap gap-3 mb-2">
+            <h3 className="font-display text-lg">Precios para {clienteSel.name}</h3>
+            <a href={`/portal/catalogo/pdf?cliente=${clienteSel.id}`} className="btn small" download>
+              Descargar su catálogo (PDF)
+            </a>
+          </div>
+          <p className="text-sm text-inksoft mb-4">
+            {Number(clienteSel.descuento) > 0 ? (
+              <>
+                Este cliente tiene un <strong>descuento del {fmtDescuento(Number(clienteSel.descuento))}</strong> sobre
+                los precios generales. Los productos que le pongas precio especial aquí se cobran a ese precio
+                especial, sin aplicarles el descuento otra vez. El descuento se edita en{' '}
+                <Link href="/admin/clientes" className="text-crate underline">Clientes</Link>.
+              </>
+            ) : (
+              <>
+                Este cliente no tiene descuento general. Puedes asignarle uno en{' '}
+                <Link href="/admin/clientes" className="text-crate underline">Clientes</Link>.
+              </>
+            )}
+          </p>
 
           {(!products || products.length === 0) && (
             <p className="text-inksoft text-sm">No hay productos activos en el catálogo.</p>
