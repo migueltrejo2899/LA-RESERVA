@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { usernameToEmail } from '@/lib/utils'
+import { normalizarDescuento } from '@/lib/precios'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
@@ -16,6 +17,7 @@ export async function createClientUser(formData: FormData) {
   const contact = String(formData.get('contact') || '').trim()
   const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
   const diasCredito = Number(formData.get('dias_credito')) || 30
+  const descuento = normalizarDescuento(formData.get('descuento'))
 
   if (!usernameRaw || !username || !password || !name) {
     redirect('/admin/clientes?error=' + encodeURIComponent('Usuario, contraseña y nombre son obligatorios.'))
@@ -44,6 +46,7 @@ export async function createClientUser(formData: FormData) {
     contact,
     rfc: rfc || null,
     dias_credito: diasCredito,
+    descuento,
   })
 
   if (profileError) {
@@ -83,6 +86,7 @@ export async function updateClientInfo(formData: FormData) {
   const contact = String(formData.get('contact') || '').trim()
   const rfc = String(formData.get('rfc') || '').trim().toUpperCase()
   const diasCredito = Number(formData.get('dias_credito')) || 30
+  const descuento = normalizarDescuento(formData.get('descuento'))
 
   if (!username || !name) {
     redirect('/admin/clientes?error=' + encodeURIComponent('El usuario y el nombre son obligatorios.'))
@@ -104,13 +108,14 @@ export async function updateClientInfo(formData: FormData) {
 
   const { error } = await admin
     .from('profiles')
-    .update({ username, name, contact, rfc: rfc || null, dias_credito: diasCredito })
+    .update({ username, name, contact, rfc: rfc || null, dias_credito: diasCredito, descuento })
     .eq('id', clientId)
   if (error) {
     const msg = error.code === '23505' ? `El usuario "${username}" ya está ocupado por otro cliente.` : error.message
     redirect('/admin/clientes?error=' + encodeURIComponent(msg))
   }
   revalidatePath('/admin/clientes')
+  revalidatePath('/portal/catalogo')
   redirect('/admin/clientes')
 }
 
