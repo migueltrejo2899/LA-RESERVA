@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { normalizarDescuento, preciosDeCliente } from '@/lib/precios'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
@@ -44,7 +45,7 @@ export async function crearPedidoCliente(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase.from('profiles').select('username, name').eq('id', user!.id).single()
+  const { data: profile } = await supabase.from('profiles').select('username, name, descuento').eq('id', user!.id).single()
   if (profile?.username?.toLowerCase() === 'publico') {
     redirect('/portal/catalogo?error=' + encodeURIComponent('Esta cuenta es solo para consultar el catálogo.'))
   }
@@ -76,14 +77,15 @@ export async function crearPedidoCliente(formData: FormData) {
   ])
 
   const especialDe = new Map((precios || []).map((p) => [p.product_id, p]))
+  const descuento = normalizarDescuento(profile?.descuento)
 
   const items: { producto: string; cantidad: number; precio: number }[] = []
   for (const s of seleccion) {
     const p = products?.find((x) => x.id === s.id)
     if (!p) continue
-    const esp = especialDe.get(p.id)
-    const precioMenudeo = esp?.precio_kilo ?? p.precio_kilo
-    const precioCaja = esp?.precio_caja ?? p.precio_caja
+    // mismos precios que ve el cliente en el catálogo (precio especial, o
+    // precio general con su descuento aplicado)
+    const { kilo: precioMenudeo, caja: precioCaja } = preciosDeCliente(p, especialDe.get(p.id), descuento)
     const unidadMenudeo = p.unidad_menudeo === 'litro' ? 'litro' : 'kilo'
     if (s.kilos > 0 && precioMenudeo != null) {
       items.push({ producto: `${p.nombre} (${unidadMenudeo})`, cantidad: s.kilos, precio: Number(precioMenudeo) })
