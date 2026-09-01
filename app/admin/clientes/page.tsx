@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtDate, fmtMoney } from '@/lib/utils'
+import { fmtDescuento } from '@/lib/precios'
 import { createClientUser, updateClientPassword, updateClientInfo } from './actions'
 import Link from 'next/link'
 
@@ -9,7 +10,7 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
   const [{ data: clients }, { data: ordersData }] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, username, name, contact, rfc, dias_credito')
+      .select('id, username, name, contact, rfc, dias_credito, descuento')
       .eq('role', 'client')
       .order('name'),
     supabase.from('orders').select('id, folio, client_id, total, created_at, payments(monto)'),
@@ -67,6 +68,11 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
               <div className="text-xs text-inksoft mb-4">Plazo para pagar sus facturas. Pasado este plazo, se marcan como vencidas.</div>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label>Descuento (%)</label><input type="number" step="0.01" name="descuento" defaultValue={0} min={0} max={100} className="mb-1" />
+              <div className="text-xs text-inksoft mb-4">Se aplica a todos los precios generales del catálogo. Los productos con precio especial no lo llevan.</div>
+            </div>
+          </div>
           {searchParams.error && <div className="text-stamp text-sm font-mono mb-4">{searchParams.error}</div>}
           <button className="btn small">Agregar cliente</button>
         </form>
@@ -85,7 +91,12 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
               <details key={c.id} className="py-3">
                 <summary className="cursor-pointer flex justify-between items-center flex-wrap gap-2">
                   <div>
-                    <div className="font-mono text-xs text-inksoft">usuario: {c.username} {c.rfc ? `· RFC: ${c.rfc}` : '· sin RFC'} · crédito: {c.dias_credito ?? 30} días</div>
+                    <div className="font-mono text-xs text-inksoft">
+                      usuario: {c.username} {c.rfc ? `· RFC: ${c.rfc}` : '· sin RFC'} · crédito: {c.dias_credito ?? 30} días
+                      {Number(c.descuento) > 0 && (
+                        <span style={{ color: '#676F36', fontWeight: 700 }}> · descuento {fmtDescuento(Number(c.descuento))}</span>
+                      )}
+                    </div>
                     <div className="font-semibold">{c.name}</div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -122,10 +133,21 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
                     <div><label>Contacto</label><input type="text" name="contact" defaultValue={c.contact || ''} /></div>
                     <div><label>RFC</label><input type="text" name="rfc" defaultValue={c.rfc || ''} placeholder="ej. XAXX010101000" /></div>
                     <div><label>Días de crédito</label><input type="number" name="dias_credito" defaultValue={c.dias_credito ?? 30} min={0} /></div>
+                    <div><label>Descuento (%)</label><input type="number" step="0.01" name="descuento" defaultValue={c.descuento ?? 0} min={0} max={100} /></div>
                     <div className="col-span-4 text-xs text-inksoft">
                       Si cambias el usuario, el cliente deberá entrar con el usuario nuevo (su contraseña no cambia).
+                      El descuento se aplica solo sobre los precios generales del catálogo; los productos con
+                      precio especial se cobran a su precio especial.
                     </div>
-                    <button className="btn small w-fit col-span-4">Guardar datos</button>
+                    <div className="col-span-4 flex flex-wrap gap-3 items-center">
+                      <button className="btn small w-fit">Guardar datos</button>
+                      <a
+                        href={`/portal/catalogo/pdf?cliente=${c.id}`}
+                        className="text-sm font-mono text-crate underline"
+                      >
+                        Descargar su catálogo (PDF)
+                      </a>
+                    </div>
                   </form>
                   <form action={updateClientPassword} className="field flex gap-3 items-end">
                     <input type="hidden" name="clientId" value={c.id} />
