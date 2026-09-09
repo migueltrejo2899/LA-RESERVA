@@ -75,6 +75,60 @@ Cuando esto funcione, tu portal ya estará viviendo en tu propio dominio. 🎉
 - Tu cliente entra con su usuario y ve todo: estatus, pagos, y en la pestaña
   **Facturas** puede filtrar por día o mes y descargar sus archivos.
 
+## Actualizaciones de la base de datos (migraciones)
+
+Cuando el portal gana una función nueva, a veces hay que agregar algo a la base
+de datos. Esos cambios están en la carpeta `supabase/migrations/`. Se corren
+igual que el `schema.sql`: **SQL Editor → New query → pegar → Run**. Son seguros
+de correr aunque ya los hayas corrido antes.
+
+**Importante:** corre la migración *antes* de publicar la versión nueva del
+sitio; si el código pide algo que aún no existe en la base, las páginas que lo
+usan van a marcar error.
+
+Migraciones, en orden:
+
+1. `2026-09-01-descuento-cliente.sql` — descuento general por cliente.
+2. `2026-09-09-descuento-por-categoria.sql` — descuentos por categoría.
+
+## Descuentos y catálogo en PDF
+
+### Cómo se decide el precio que ve un cliente
+
+En este orden:
+
+1. Si el producto tiene **precio especial** para ese cliente (Catálogo →
+   Precios por cliente), manda ese precio tal cual. No se le aplica ningún
+   descuento encima. En el PDF sale marcado con `*`.
+2. Si no, y la **categoría** del producto tiene un descuento para ese cliente,
+   se aplica ese porcentaje sobre el precio general.
+3. Si no, se aplica el **descuento general** del cliente.
+
+El descuento de categoría **reemplaza** al general, no se suman. Los productos
+sin categoría usan el general. La cuenta `publico` siempre ve precios de lista.
+
+El pedido que hace el cliente se registra con exactamente los precios que vio en
+pantalla, así que el total nunca se desfasa.
+
+### Dónde se capturan
+
+- **Descuento general**: campo "Descuento (%)" en Clientes, al dar de alta y al
+  editar.
+- **Descuentos por categoría**: en dos lugares, es el mismo formulario y da igual
+  cuál uses — en la ficha del cliente (Clientes) y en Catálogo → Precios por
+  cliente, al elegir un cliente. Deja una categoría en 0 o vacía para que vuelva
+  a usar el descuento general.
+
+### Descargar el catálogo en PDF
+
+El botón **Descargar catálogo (PDF)** aparece:
+
+- en el portal del cliente (pestaña Catálogo) — su catálogo, con sus precios y
+  sus descuentos ya aplicados;
+- en el panel de admin, en **Catálogo** — precios generales de lista;
+- en **Clientes** y en **Catálogo → Precios por cliente** — el catálogo de un
+  cliente en particular, para mandárselo por correo o WhatsApp.
+
 ## Costos aproximados
 
 - Supabase: gratis hasta 500MB de base de datos y 1GB de archivos (te alcanza
