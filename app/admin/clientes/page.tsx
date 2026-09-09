@@ -2,19 +2,37 @@ import { createClient } from '@/lib/supabase/server'
 import { fmtDate, fmtMoney } from '@/lib/utils'
 import { fmtDescuento } from '@/lib/precios'
 import { createClientUser, updateClientPassword, updateClientInfo } from './actions'
+import FormDescuentos from '../descuentos/FormDescuentos'
 import Link from 'next/link'
 
-export default async function ClientesPage({ searchParams }: { searchParams: { error?: string } }) {
+export default async function ClientesPage({
+  searchParams,
+}: {
+  searchParams: { error?: string; ok?: string }
+}) {
   const supabase = createClient()
 
-  const [{ data: clients }, { data: ordersData }] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('id, username, name, contact, rfc, dias_credito, descuento')
-      .eq('role', 'client')
-      .order('name'),
-    supabase.from('orders').select('id, folio, client_id, total, created_at, payments(monto)'),
-  ])
+  const [{ data: clients }, { data: ordersData }, { data: categoriasData }, { data: descuentosCat }] =
+    await Promise.all([
+      supabase
+        .from('profiles')
+        .select('id, username, name, contact, rfc, dias_credito, descuento')
+        .eq('role', 'client')
+        .order('name'),
+      supabase.from('orders').select('id, folio, client_id, total, created_at, payments(monto)'),
+      supabase.from('categorias').select('nombre').order('nombre'),
+      supabase.from('client_category_discounts').select('client_id, categoria, descuento'),
+    ])
+
+  const CATEGORIAS = (categoriasData || []).map((c) => c.nombre)
+
+  // client_id -> (categoría -> porcentaje)
+  const descuentosPorCliente = new Map<string, Map<string, number>>()
+  for (const d of descuentosCat || []) {
+    const mapa = descuentosPorCliente.get(d.client_id) || new Map<string, number>()
+    mapa.set(d.categoria, Number(d.descuento))
+    descuentosPorCliente.set(d.client_id, mapa)
+  }
 
   // saldo pendiente por cliente y lista de sus pedidos con saldo
   const saldoPorCliente = new Map<string, number>()
@@ -38,6 +56,12 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
 
   return (
     <div className="space-y-5">
+      {searchParams.ok && (
+        <div className="card" style={{ borderColor: '#676F36' }}>
+          <p className="text-sm" style={{ color: '#676F36' }}>{searchParams.ok}</p>
+        </div>
+      )}
+
       {totalPorCobrar > 0 && (
         <div className="card" style={{ borderColor: '#C2492A' }}>
           <div className="flex justify-between items-center flex-wrap gap-2">
@@ -96,6 +120,11 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
                       {Number(c.descuento) > 0 && (
                         <span style={{ color: '#676F36', fontWeight: 700 }}> · descuento {fmtDescuento(Number(c.descuento))}</span>
                       )}
+                      {(descuentosPorCliente.get(c.id)?.size || 0) > 0 && (
+                        <span style={{ color: '#676F36', fontWeight: 700 }}>
+                          {' '}· {descuentosPorCliente.get(c.id)!.size} categoría(s) con descuento propio
+                        </span>
+                      )}
                     </div>
                     <div className="font-semibold">{c.name}</div>
                   </div>
@@ -149,6 +178,19 @@ export default async function ClientesPage({ searchParams }: { searchParams: { e
                       </a>
                     </div>
                   </form>
+
+                  <div className="p-3 rounded" style={{ border: '1px dashed #CBBFA4', background: '#FDFBF5' }}>
+                    <div className="font-subtitle text-xs uppercase tracking-widest mb-2 text-inksoft">
+                      Descuentos por categoría
+                    </div>
+                    <FormDescuentos
+                      clientId={c.id}
+                      categorias={CATEGORIAS}
+                      actuales={descuentosPorCliente.get(c.id) || new Map()}
+                      descuentoGeneral={Number(c.descuento) || 0}
+                      volverA="/admin/clientes"
+                    />
+                  </div>
                   <form action={updateClientPassword} className="field flex gap-3 items-end">
                     <input type="hidden" name="clientId" value={c.id} />
                     <div className="flex-1">
