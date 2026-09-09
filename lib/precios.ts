@@ -4,10 +4,14 @@
 // Reglas del negocio (un solo lugar para no repetirlas):
 //  1. Si el producto tiene PRECIO ESPECIAL para ese cliente, manda el
 //     precio especial tal cual (ya es un precio negociado; no se le
-//     vuelve a aplicar el descuento).
+//     vuelve a aplicar ningún descuento).
 //  2. Si no tiene precio especial, se toma el precio general del
-//     catálogo y se le aplica el DESCUENTO del cliente.
-//  3. El descuento se guarda en profiles.descuento (0 a 100).
+//     catálogo y se le aplica el DESCUENTO que le toque:
+//       · el de la CATEGORÍA del producto, si el cliente tiene uno
+//         (tabla client_category_discounts), o
+//       · si no, el descuento GENERAL del cliente (profiles.descuento).
+//     El descuento de categoría REEMPLAZA al general, no se suman.
+//  3. Los productos sin categoría usan el descuento general.
 // ============================================================
 
 export type PrecioEspecial = {
@@ -30,6 +34,8 @@ export type PrecioResuelto = {
   especialCaja: boolean
   /** se aplicó el descuento en alguna presentación */
   tieneDescuento: boolean
+  /** porcentaje de descuento que se usó en este producto (0 si ninguno) */
+  descuentoAplicado: number
 }
 
 /** Deja el descuento siempre dentro de 0-100. */
@@ -50,9 +56,41 @@ export function aplicarDescuento(precio: number | null | undefined, descuento: n
 }
 
 /**
+ * Convierte los renglones de client_category_discounts en un mapa
+ * categoría -> porcentaje, listo para usarse en las páginas.
+ */
+export function mapaDescuentosPorCategoria(
+  filas: { categoria: string; descuento: number | string }[] | null | undefined
+): Map<string, number> {
+  const mapa = new Map<string, number>()
+  for (const f of filas || []) {
+    if (!f?.categoria) continue
+    const d = normalizarDescuento(f.descuento)
+    if (d > 0) mapa.set(f.categoria, d)
+  }
+  return mapa
+}
+
+/**
+ * Descuento que le toca a un producto: el de su categoría si existe,
+ * si no el general del cliente.
+ */
+export function descuentoAplicable(
+  categoria: string | null | undefined,
+  descuentoGeneral: unknown,
+  porCategoria?: Map<string, number> | null
+): number {
+  if (categoria && porCategoria) {
+    const d = porCategoria.get(categoria)
+    if (d != null) return normalizarDescuento(d)
+  }
+  return normalizarDescuento(descuentoGeneral)
+}
+
+/**
  * Resuelve los precios que le tocan a un cliente para un producto.
- * `producto` trae los precios generales, `especial` el registro de
- * client_prices (si existe) y `descuento` el porcentaje del cliente.
+ * `descuento` ya debe venir resuelto (usa descuentoAplicable) o, más
+ * cómodo, usa preciosDeClienteConCategorias.
  */
 export function preciosDeCliente(
   producto: { precio_kilo?: number | null; precio_caja?: number | null },
@@ -82,7 +120,25 @@ export function preciosDeCliente(
     especialKilo: espKilo != null,
     especialCaja: espCaja != null,
     tieneDescuento: descuentoEnKilo || descuentoEnCaja,
+    descuentoAplicado: descuentoEnKilo || descuentoEnCaja ? d : 0,
   }
+}
+
+/**
+ * Igual que preciosDeCliente, pero resolviendo solo el descuento que
+ * le toca al producto según su categoría. Es la que usan las páginas.
+ */
+export function preciosDeClienteConCategorias(
+  producto: { precio_kilo?: number | null; precio_caja?: number | null; categoria?: string | null },
+  especial: PrecioEspecial,
+  descuentoGeneral: unknown,
+  porCategoria?: Map<string, number> | null
+): PrecioResuelto {
+  return preciosDeCliente(
+    producto,
+    especial,
+    descuentoAplicable(producto.categoria, descuentoGeneral, porCategoria)
+  )
 }
 
 /** "15%" / "12.5%" sin decimales inútiles. */
