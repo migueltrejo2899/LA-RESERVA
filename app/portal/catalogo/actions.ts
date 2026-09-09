@@ -1,7 +1,11 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { normalizarDescuento, preciosDeCliente } from '@/lib/precios'
+import {
+  mapaDescuentosPorCategoria,
+  normalizarDescuento,
+  preciosDeClienteConCategorias,
+} from '@/lib/precios'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
@@ -66,26 +70,34 @@ export async function crearPedidoCliente(formData: FormData) {
     redirect('/portal/catalogo?error=' + encodeURIComponent('Captura al menos una cantidad para hacer tu pedido.'))
   }
 
-  const [{ data: products }, { data: precios }] = await Promise.all([
+  const [{ data: products }, { data: precios }, { data: descuentosCat }] = await Promise.all([
     supabase
       .from('products')
-      .select('id, nombre, precio_kilo, precio_caja, unidad_menudeo')
+      .select('id, nombre, precio_kilo, precio_caja, unidad_menudeo, categoria')
       .eq('publicado', true)
       .eq('activo', true)
       .in('id', seleccion.map((s) => s.id)),
     supabase.from('client_prices').select('product_id, precio_kilo, precio_caja').eq('client_id', user!.id),
+    supabase.from('client_category_discounts').select('categoria, descuento').eq('client_id', user!.id),
   ])
 
   const especialDe = new Map((precios || []).map((p) => [p.product_id, p]))
   const descuento = normalizarDescuento(profile?.descuento)
+  const porCategoria = mapaDescuentosPorCategoria(descuentosCat)
 
   const items: { producto: string; cantidad: number; precio: number }[] = []
   for (const s of seleccion) {
     const p = products?.find((x) => x.id === s.id)
     if (!p) continue
     // mismos precios que ve el cliente en el catálogo (precio especial, o
-    // precio general con su descuento aplicado)
-    const { kilo: precioMenudeo, caja: precioCaja } = preciosDeCliente(p, especialDe.get(p.id), descuento)
+    // precio general con el descuento que le toque: el de la categoría
+    // del producto, o el general)
+    const { kilo: precioMenudeo, caja: precioCaja } = preciosDeClienteConCategorias(
+      p,
+      especialDe.get(p.id),
+      descuento,
+      porCategoria
+    )
     const unidadMenudeo = p.unidad_menudeo === 'litro' ? 'litro' : 'kilo'
     if (s.kilos > 0 && precioMenudeo != null) {
       items.push({ producto: `${p.nombre} (${unidadMenudeo})`, cantidad: s.kilos, precio: Number(precioMenudeo) })
