@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
 import { fmtDescuento } from '@/lib/precios'
+import FormDescuentos from '../../descuentos/FormDescuentos'
 import Link from 'next/link'
 import { setClientPrice, updatePreciosMasivos } from './actions'
 
@@ -11,21 +12,32 @@ export default async function PreciosPorCliente({
 }) {
   const supabase = createClient()
 
-  const [{ data: clients }, { data: products }] = await Promise.all([
+  const [{ data: clients }, { data: products }, { data: categoriasData }] = await Promise.all([
     supabase.from('profiles').select('id, name, username, descuento').eq('role', 'client').order('name'),
     supabase.from('products').select('*').eq('activo', true).order('nombre'),
+    supabase.from('categorias').select('nombre').order('nombre'),
   ])
+
+  const CATEGORIAS = (categoriasData || []).map((c) => c.nombre)
 
   const clienteId = searchParams.cliente || ''
   const clienteSel = clients?.find((c) => c.id === clienteId)
 
   let precios: any[] = []
+  const descuentosCategoria = new Map<string, number>()
   if (clienteId) {
-    const { data } = await supabase
-      .from('client_prices')
-      .select('product_id, precio_kilo, precio_caja')
-      .eq('client_id', clienteId)
+    const [{ data }, { data: dcat }] = await Promise.all([
+      supabase
+        .from('client_prices')
+        .select('product_id, precio_kilo, precio_caja')
+        .eq('client_id', clienteId),
+      supabase
+        .from('client_category_discounts')
+        .select('categoria, descuento')
+        .eq('client_id', clienteId),
+    ])
     precios = data || []
+    for (const d of dcat || []) descuentosCategoria.set(d.categoria, Number(d.descuento))
   }
   const especialDe = new Map(precios.map((p) => [p.product_id, p]))
 
@@ -105,6 +117,21 @@ export default async function PreciosPorCliente({
           <button className="btn small">Ver precios</button>
         </form>
       </div>
+
+      {clienteSel && (
+        <div className="card">
+          <h3 className="font-display text-lg mb-4">
+            Descuentos por categoría de {clienteSel.name}
+          </h3>
+          <FormDescuentos
+            clientId={clienteSel.id}
+            categorias={CATEGORIAS}
+            actuales={descuentosCategoria}
+            descuentoGeneral={Number(clienteSel.descuento) || 0}
+            volverA={`/admin/catalogo/precios?cliente=${clienteSel.id}`}
+          />
+        </div>
+      )}
 
       {clienteSel && (
         <div className="card">
