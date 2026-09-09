@@ -23,7 +23,10 @@ export type GrupoCatalogo = {
 
 export type DatosCatalogo = {
   cliente: string | null
+  /** descuento general del cliente */
   descuento: number
+  /** descuentos que reemplazan al general en ciertas categorías */
+  descuentosPorCategoria?: Map<string, number> | null
   grupos: GrupoCatalogo[]
 }
 
@@ -60,6 +63,24 @@ function fechaLarga(d = new Date()): string {
   return `${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}`
 }
 
+/** Parte un texto largo en renglones que quepan en `ancho` puntos. */
+function partirTexto(texto: string, font: PDFFont, size: number, ancho: number): string[] {
+  const palabras = limpiar(texto).split(' ').filter(Boolean)
+  const lineas: string[] = []
+  let actual = ''
+  for (const p of palabras) {
+    const prueba = actual ? actual + ' ' + p : p
+    if (font.widthOfTextAtSize(prueba, size) > ancho && actual) {
+      lineas.push(actual)
+      actual = p
+    } else {
+      actual = prueba
+    }
+  }
+  if (actual) lineas.push(actual)
+  return lineas
+}
+
 /** Recorta el texto para que quepa en `ancho` puntos, con "..." al final. */
 function recortar(texto: string, font: PDFFont, size: number, ancho: number): string {
   let t = limpiar(texto)
@@ -83,7 +104,8 @@ const MARGEN = 40
 
 export async function generarCatalogoPDF(datos: DatosCatalogo): Promise<Uint8Array> {
   const { cliente, descuento, grupos } = datos
-  const conDescuento = descuento > 0
+  const porCategoria = datos.descuentosPorCategoria || new Map<string, number>()
+  const conDescuento = descuento > 0 || porCategoria.size > 0
 
   const hayEspeciales = grupos.some((g) => g.items.some((i) => i.especialKilo || i.especialCaja))
 
@@ -97,20 +119,20 @@ export async function generarCatalogoPDF(datos: DatosCatalogo): Promise<Uint8Arr
   // Columnas: [x, ancho, alineación]
   const cols = conDescuento
     ? {
-        sku: { x: MARGEN, w: 62 },
-        nombre: { x: MARGEN + 66, w: 208 },
-        mndLista: { x: MARGEN + 278, w: 62 },
-        mnd: { x: MARGEN + 344, w: 66 },
-        cajaLista: { x: MARGEN + 414, w: 62 },
-        caja: { x: MARGEN + 480, w: 66 },
+        sku: { x: 40, w: 96 },
+        nombre: { x: 142, w: 150 },
+        mndLista: { x: 298, w: 62 },
+        mnd: { x: 366, w: 66 },
+        cajaLista: { x: 438, w: 62 },
+        caja: { x: 506, w: 66 },
       }
     : {
-        sku: { x: MARGEN, w: 76 },
-        nombre: { x: MARGEN + 80, w: 258 },
+        sku: { x: 40, w: 110 },
+        nombre: { x: 156, w: 246 },
         mndLista: null as any,
-        mnd: { x: MARGEN + 342, w: 90 },
+        mnd: { x: 412, w: 80 },
         cajaLista: null as any,
-        caja: { x: MARGEN + 440, w: 92 },
+        caja: { x: 492, w: 80 },
       }
 
   let page: PDFPage = pdf.addPage([ANCHO, ALTO])
@@ -155,12 +177,28 @@ export async function generarCatalogoPDF(datos: DatosCatalogo): Promise<Uint8Arr
         page.drawText(limpiar(`Cliente: ${cliente}`), { x: MARGEN, y, size: 10, font: bold, color: TINTA })
         y -= 14
       }
-      if (conDescuento) {
+      if (descuento > 0) {
         page.drawText(
           limpiar(`Precios con tu descuento del ${fmtDescuento(descuento)} ya aplicado.`),
           { x: MARGEN, y, size: 9.5, font: bold, color: OLIVA }
         )
         y -= 13
+      }
+      if (porCategoria.size > 0) {
+        const detalle = Array.from(porCategoria.entries())
+          .map(([cat, d]) => `${cat} ${fmtDescuento(d)}`)
+          .join('  ·  ')
+        const lineas = partirTexto(
+          `En estas categorias aplica otro porcentaje: ${detalle}.`,
+          normal,
+          9,
+          ANCHO - MARGEN * 2
+        )
+        for (const linea of lineas) {
+          page.drawText(linea, { x: MARGEN, y, size: 9, font: normal, color: OLIVA })
+          y -= 11
+        }
+        y -= 2
       }
       if (hayEspeciales) {
         page.drawText(
@@ -205,7 +243,18 @@ export async function generarCatalogoPDF(datos: DatosCatalogo): Promise<Uint8Arr
   for (const g of grupos) {
     espacio(34)
     y -= 6
+    const dCat = porCategoria.get(g.nombre)
     page.drawText(limpiar(g.nombre.toUpperCase()), { x: MARGEN, y, size: 9, font: bold, color: OLIVA })
+    if (dCat) {
+      const anchoTitulo = bold.widthOfTextAtSize(limpiar(g.nombre.toUpperCase()), 9)
+      page.drawText(limpiar(`— descuento ${fmtDescuento(dCat)}`), {
+        x: MARGEN + anchoTitulo + 8,
+        y,
+        size: 8,
+        font: normal,
+        color: OLIVA,
+      })
+    }
     y -= 4
     page.drawLine({
       start: { x: MARGEN, y },
@@ -218,7 +267,7 @@ export async function generarCatalogoPDF(datos: DatosCatalogo): Promise<Uint8Arr
     for (const it of g.items) {
       espacio(16)
       const size = 8.5
-      page.drawText(recortar(it.sku, normal, 7.5, cols.sku.w), { x: cols.sku.x, y, size: 7.5, font: normal, color: SUAVE })
+      page.drawText(recortar(it.sku, normal, 7, cols.sku.w), { x: cols.sku.x, y, size: 7, font: normal, color: SUAVE })
 
       const etiquetaUnidad = it.unidad ? ` (${it.unidad})` : ''
       page.drawText(recortar(it.nombre + etiquetaUnidad, normal, size, cols.nombre.w), {
