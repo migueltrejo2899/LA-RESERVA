@@ -1,5 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
-import { normalizarDescuento, preciosDeCliente } from '@/lib/precios'
+import {
+  mapaDescuentosPorCategoria,
+  normalizarDescuento,
+  preciosDeClienteConCategorias,
+} from '@/lib/precios'
 import { generarCatalogoPDF, nombreArchivoCatalogo, type FilaCatalogo, type GrupoCatalogo } from '@/lib/catalogo-pdf'
 import { NextResponse, type NextRequest } from 'next/server'
 
@@ -59,7 +63,7 @@ export async function GET(request: NextRequest) {
     clienteId = null
   }
 
-  const [{ data: products }, { data: categoriasData }, especialesRes] = await Promise.all([
+  const [{ data: products }, { data: categoriasData }, especialesRes, descuentosRes] = await Promise.all([
     supabase
       .from('products')
       .select('id, sku, nombre, unidad, categoria, unidad_menudeo, precio_kilo, precio_caja')
@@ -70,13 +74,17 @@ export async function GET(request: NextRequest) {
     clienteId
       ? supabase.from('client_prices').select('product_id, precio_kilo, precio_caja').eq('client_id', clienteId)
       : Promise.resolve({ data: [] as any[] }),
+    clienteId
+      ? supabase.from('client_category_discounts').select('categoria, descuento').eq('client_id', clienteId)
+      : Promise.resolve({ data: [] as any[] }),
   ])
 
   const especialDe = new Map(((especialesRes as any).data || []).map((p: any) => [p.product_id, p]))
+  const porCategoria = mapaDescuentosPorCategoria((descuentosRes as any).data)
   const CATEGORIAS = (categoriasData || []).map((c) => c.nombre)
 
   const filas: (FilaCatalogo & { categoria: string | null })[] = (products || []).map((p: any) => {
-    const pr = preciosDeCliente(p, especialDe.get(p.id) as any, descuento)
+    const pr = preciosDeClienteConCategorias(p, especialDe.get(p.id) as any, descuento, porCategoria)
     return {
       categoria: p.categoria ?? null,
       sku: p.sku || '',
@@ -99,7 +107,12 @@ export async function GET(request: NextRequest) {
   const otros = filas.filter((f) => !f.categoria || !CATEGORIAS.includes(f.categoria))
   if (otros.length > 0) grupos.push({ nombre: 'Otros', items: otros })
 
-  const pdf = await generarCatalogoPDF({ cliente: clienteNombre, descuento, grupos })
+  const pdf = await generarCatalogoPDF({
+    cliente: clienteNombre,
+    descuento,
+    descuentosPorCategoria: porCategoria,
+    grupos,
+  })
 
   return new NextResponse(Buffer.from(pdf), {
     status: 200,
