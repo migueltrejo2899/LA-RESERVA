@@ -1,6 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { fmtMoney } from '@/lib/utils'
-import { fmtDescuento, normalizarDescuento, preciosDeCliente } from '@/lib/precios'
+import {
+  fmtDescuento,
+  mapaDescuentosPorCategoria,
+  normalizarDescuento,
+  preciosDeClienteConCategorias,
+} from '@/lib/precios'
 import Link from 'next/link'
 import { crearPedidoCliente } from './actions'
 import Buscador from './Buscador'
@@ -21,7 +26,13 @@ export default async function PortalCatalogoPage({
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: profile }, { data: products }, { data: precios }, { data: categoriasData }] = await Promise.all([
+  const [
+    { data: profile },
+    { data: products },
+    { data: precios },
+    { data: categoriasData },
+    { data: descuentosCat },
+  ] = await Promise.all([
     supabase.from('profiles').select('username, descuento').eq('id', user!.id).single(),
     supabase
       .from('products')
@@ -31,15 +42,17 @@ export default async function PortalCatalogoPage({
       .order('nombre'),
     supabase.from('client_prices').select('product_id, precio_kilo, precio_caja').eq('client_id', user!.id),
     supabase.from('categorias').select('nombre').order('nombre'),
+    supabase.from('client_category_discounts').select('categoria, descuento').eq('client_id', user!.id),
   ])
 
   const CATEGORIAS = (categoriasData || []).map((c) => c.nombre)
   const esPublico = profile?.username?.toLowerCase() === 'publico'
   const descuento = esPublico ? 0 : normalizarDescuento(profile?.descuento)
+  const porCategoria = esPublico ? new Map<string, number>() : mapaDescuentosPorCategoria(descuentosCat)
   const especialDe = new Map((precios || []).map((p) => [p.product_id, p]))
 
   const todos = (products || []).map((p) => {
-    const pr = preciosDeCliente(p, especialDe.get(p.id), descuento)
+    const pr = preciosDeClienteConCategorias(p, especialDe.get(p.id), descuento, porCategoria)
     return {
       ...p,
       imagenUrl: p.imagen_path ? supabase.storage.from('productos').getPublicUrl(p.imagen_path).data.publicUrl : null,
@@ -50,6 +63,7 @@ export default async function PortalCatalogoPage({
       esLitro: p.unidad_menudeo === 'litro',
       tieneEspecial: pr.tieneEspecial,
       tieneDescuento: pr.tieneDescuento,
+      descuentoAplicado: pr.descuentoAplicado,
     }
   })
 
@@ -116,7 +130,7 @@ export default async function PortalCatalogoPage({
         )}
         {p.tieneDescuento && (
           <div className="text-xs text-right" style={{ color: '#676F36' }}>
-            incluye tu descuento del {fmtDescuento(descuento)}
+            incluye tu descuento del {fmtDescuento(p.descuentoAplicado)}
           </div>
         )}
       </div>
@@ -190,10 +204,24 @@ export default async function PortalCatalogoPage({
           )}
         </div>
 
-        {descuento > 0 && (
+        {(descuento > 0 || porCategoria.size > 0) && (
           <div className="mb-4 p-3 rounded text-sm" style={{ background: '#EFF0E4', border: '1px dashed #676F36', color: '#3F4522' }}>
-            Tienes un <strong>descuento del {fmtDescuento(descuento)}</strong> sobre los precios de lista.
-            Los precios que ves abajo y en el PDF ya lo incluyen.
+            {descuento > 0 ? (
+              <>Tienes un <strong>descuento del {fmtDescuento(descuento)}</strong> sobre los precios de lista.</>
+            ) : (
+              <>Tienes descuentos asignados sobre los precios de lista.</>
+            )}
+            {porCategoria.size > 0 && (
+              <>
+                {' '}En estas categorías aplica otro porcentaje:{' '}
+                <strong>
+                  {Array.from(porCategoria.entries())
+                    .map(([cat, d]) => `${cat} ${fmtDescuento(d)}`)
+                    .join(' · ')}
+                </strong>.
+              </>
+            )}
+            {' '}Los precios que ves abajo y en el PDF ya lo incluyen.
           </div>
         )}
 
